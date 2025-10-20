@@ -91,9 +91,6 @@ class PatientInfo(Base):
     doctor = Column(String)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
-
 # Pydantic Models
 class PatientCreate(BaseModel):
     name: str
@@ -184,6 +181,17 @@ class PatientInfoResponse(BaseModel):
 
 # FastAPI app
 app = FastAPI(title="CareGiver API", version="1.0.0")
+
+# Startup event to create database tables
+@app.on_event("startup")
+async def startup_event():
+    """Create database tables on startup"""
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables created successfully")
+    except Exception as e:
+        print(f"❌ Error creating database tables: {e}")
+        # Don't crash the app, let it retry on next request
 
 # CORS middleware
 app.add_middleware(
