@@ -357,6 +357,20 @@ def delete_checkin(checkin_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Check-in deleted successfully"}
 
+@app.get("/api/checkins/medications")
+async def get_medication_checks(date: str, db: Session = Depends(get_db)):
+    # Convert date string to date object
+    check_date = datetime.strptime(date, "%Y-%m-%d").date()
+    
+    # Query check-ins for this date
+    check_ins = db.query(CheckIn).filter(
+        CheckIn.category == "Medications",
+        CheckIn.created_at >= check_date,
+        CheckIn.created_at < check_date + timedelta(days=1)
+    ).all()
+    
+    return check_ins
+
 # Medication endpoints
 @app.post("/api/medications", response_model=MedicationResponse)
 def create_medication(medication: MedicationCreate, db: Session = Depends(get_db)):
