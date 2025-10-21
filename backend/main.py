@@ -198,9 +198,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # Local development
-        "https://care-giver-ten.vercel.app/",
-        "https://care-giver-git-main-traes-projects-9301e5d2.vercel.app/",
-        "https://care-giver-traes-projects-9301e5d2.vercel.app/",   # Vercel deployments (replace * with your app name)
+        "https://care-giver-ten.vercel.app",
+        "https://care-giver-git-main-traes-projects-9301e5d2.vercel.app",
+        "https://care-giver-traes-projects-9301e5d2.vercel.app",   # Vercel deployments (replace * with your app name)
         os.getenv("FRONTEND_URL", "http://localhost:3000")  # Custom frontend URL
     ],
     allow_credentials=True,
