@@ -673,16 +673,20 @@ def symptom_aggregation(
         raise HTTPException(status_code=400, detail="group_by must be 'day', 'week', or 'month'")
 
     results = (
-        db.query(func.to_char(SymptomLog.start_time, fmt).label("period"), SymptomLog.symptom_type, func.count().label("count"))
+        db.query(
+            func.to_char(SymptomLog.start_time, fmt).label("period"),
+            SymptomLog.symptom_type,
+            func.avg(SymptomLog.severity).label("avg_severity")
+        )
         .group_by("period", SymptomLog.symptom_type)
         .order_by("period")
         .all()
     )
 
-    # Transform results into nested dict { period: { symptom_type: count } }
+    # Transform results into nested dict { period: { symptom_type: avg_severity } }
     out = {}
-    for period, symptom_type, count in results:
-        out.setdefault(period, {})[symptom_type] = count
+    for period, symptom_type, avg_severity in results:
+        out.setdefault(period, {})[symptom_type] = avg_severity
 
     return out
 
