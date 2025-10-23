@@ -191,6 +191,7 @@ class CheckInCreate(BaseModel):
     patient_id: int
     category: str
     data: dict
+    
 
 class CheckInResponse(BaseModel):
     id: int
