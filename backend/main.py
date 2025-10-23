@@ -664,11 +664,11 @@ def symptom_aggregation(
 
     # Build aggregation
     if group_by == "day":
-        fmt = "%Y-%m-%d"
+        fmt = 'YYYY-MM-DD'
     elif group_by == "week":
-        fmt = "%Y-%W"
+        fmt = 'IYYY-IW'  # ISO week format for PostgreSQL
     elif group_by == "month":
-        fmt = "%Y-%m"
+        fmt = 'YYYY-MM'
     else:
         raise HTTPException(status_code=400, detail="group_by must be 'day', 'week', or 'month'")
 
