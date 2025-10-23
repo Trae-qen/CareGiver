@@ -1,83 +1,144 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
+import { medicationScheduleAPI, medicationAdherenceAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import SymptomHistoryChart from './SymptomHistoryChart';
 import AppIcon from '../common/AppIcon';
 import { useCheckIn } from '../../context/CheckInContext';
 import { useCarePlan } from '../../context/CarePlanContext';
-import { useAuth } from '../../context/AuthContext';
-import { mockReminders } from '../../data/mockData';
+// import { mockReminders } from '../../data/mockData';
 import { iconColors, categoryIconColors } from '../../utils/iconColors';
 
 const TodayView = () => {
-    const { getCheckInsByDate, addCheckIn } = useCheckIn();
+    const { getCheckInsByDate, adherences, isAdherenceLoading, refreshAdherenceData } = useCheckIn();
     const { getActiveMedications } = useCarePlan();
-    const { user } = useAuth();
-    const [date, setDate] = useState(new Date());
-    const [checkedState, setCheckedState] = useState({});
-    
+    const { user, selectedPatient } = useAuth();
+
+    // Medication schedules state (still local, as CheckInContext only manages adherence records)
+    const [todaySchedules, setTodaySchedules] = useState([]);
+    const [loadingSchedules, setLoadingSchedules] = useState(true);
+
+    const fetchSchedules = async () => {
+        if (!selectedPatient) return;
+        const todayStr = new Date().toISOString().split('T')[0];
+        setLoadingSchedules(true);
+        try {
+            const schedules = await medicationScheduleAPI.getAll({ patient_id: selectedPatient.id });
+            const filteredSchedules = schedules.filter(sch => sch.recurrence_rule === 'daily' || sch.recurrence_rule === 'as_needed' || (sch.next_run && sch.next_run.startsWith(todayStr)));
+            setTodaySchedules(filteredSchedules);
+        } catch (error) {
+            console.error('TodayView: Failed to fetch schedules:', error);
+        } finally {
+            setLoadingSchedules(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchSchedules();
+    }, [selectedPatient]); // Re-fetch schedules when selectedPatient changes
+
+    const handleAdherence = async (schedule, status) => {
+        if (!user || !selectedPatient) {
+            return;
+        }
+        const today = new Date();
+        const scheduledTime = new Date();
+        const [h, m] = schedule.time_of_day.split(':');
+        scheduledTime.setHours(Number(h), Number(m), 0, 0);
+        try {
+            await medicationAdherenceAPI.create({
+                medication_id: schedule.medication_id,
+                user_id: user.id,
+                patient_id: selectedPatient.id,
+                scheduled_time: scheduledTime.toISOString(),
+                taken_time: status === 'taken' ? today.toISOString() : null,
+                status,
+                notes: ''
+            });
+            refreshAdherenceData(); // Refresh adherence data from CheckInContext
+        } catch (error) {
+            console.error('TodayView: Failed to create adherence record:', error);
+        }
+    };
+    const date = new Date(); // Removed state since we're not allowing date changes
+
     const todayCheckIns = getCheckInsByDate(date);
     const activeMedications = getActiveMedications();
+    // Deduplicate medications by id (or name+dosage fallback) in case backend returns duplicates
+    const uniqueActiveMedications = (() => {
+        const map = new Map();
+        activeMedications.forEach(med => {
+            const key = med.id ?? `${med.name}-${med.dosage}`;
+            if (!map.has(key)) map.set(key, med);
+        });
+        const meds = Array.from(map.values());
+        return meds;
+    })();
 
-    const handleCheck = (id) => {
-        setCheckedState(prevState => ({ ...prevState, [id]: !prevState[id] }));
-    };
-
-    const handleMedicationCheck = (medication) => {
-        // Create a check-in entry for this medication
-        const now = new Date();
-        const medicationData = {
-            name: medication.name,
-            dosage: medication.dosage,
-            time: now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-            notes: `Administered as scheduled (${medication.frequency})`
-        };
-        
-        addCheckIn('Medications', medicationData, user);
-    };
+    // Check-in functionality has been moved to the dedicated CheckIn screen
 
     const days = useMemo(() => {
-        const d = new Date(date);
-        d.setDate(d.getDate() - 2);
+        // Build a 7-day range centered on `date` (2 days before to 4 days after)
+        const start = new Date(date);
+        start.setDate(start.getDate() - 2);
         return Array.from({ length: 7 }, (_, i) => {
-            const newDate = new Date(d);
-            newDate.setDate(d.getDate() + i);
+            const newDate = new Date(start);
+            newDate.setDate(start.getDate() + i);
+            const newDateStr = newDate.toISOString().split('T')[0];
+            const activeDateStr = new Date(date).toISOString().split('T')[0];
             return {
+                dateObj: newDate,
                 day: newDate.toLocaleDateString('en-US', { weekday: 'short' }).charAt(0),
                 date: newDate.getDate(),
-                isToday: newDate.getDate() === date.getDate()
+                iso: newDateStr,
+                isToday: newDateStr === activeDateStr
             };
         });
     }, [date]);
 
-    const groupedReminders = mockReminders.reduce((acc, reminder) => {
-        const group = reminder.group;
-        if (!acc[group]) {
-            acc[group] = [];
+    // Generate reminders for each scheduled medication for today
+    const medReminders = todaySchedules.map(sch => {
+        const med = uniqueActiveMedications.find(m => m.id === sch.medication_id);
+        // sch.time_of_day expected like '08:00' or '8:00'
+        const parts = (sch.time_of_day || '').split(':');
+        let postTimeLabel = sch.time_of_day || '';
+        try {
+            const medHour = parseInt(parts[0], 10);
+            const medMin = parseInt(parts[1] || '0', 10);
+            const baseDate = new Date(date);
+            baseDate.setHours(medHour, medMin, 0, 0);
+            const postDate = new Date(baseDate.getTime() + 60 * 60 * 1000);
+            postTimeLabel = postDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        } catch (e) {
+            postTimeLabel = sch.time_of_day || '';
         }
+
+        return {
+            id: `postmed-${sch.id}`,
+            time: postTimeLabel,
+            title: `Post-med check for ${med?.name || 'Medication'}`,
+            icon: 'check-in',
+            color: 'indigo',
+            group: 'Post-Med'
+        };
+    });
+
+    const allReminders = [...medReminders];
+
+    const groupedReminders = allReminders.reduce((acc, reminder) => {
+        const group = reminder.group || 'General';
+        if (!acc[group]) acc[group] = [];
         acc[group].push(reminder);
         return acc;
     }, {});
 
     return (
         <div className="p-4 bg-gray-50 min-h-full">
-            <header className="flex items-center justify-between mb-6">
-                <div className="flex items-center space-x-2">
-                     <AppIcon name="info" className="w-6 h-6 text-gray-400" />
-                </div>
+            <SymptomHistoryChart />
+            <header className="flex items-center justify-center mb-6">
                 <h1 className="text-xl font-bold text-gray-800">
                     {date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
                 </h1>
-                <div className="flex items-center space-x-2">
-                     <AppIcon name="reminders" className="w-6 h-6 text-red-500" />
-                </div>
             </header>
-            
-            <div className="flex justify-between mb-8 px-2">
-                {days.map((d, i) => (
-                    <div key={i} className={`text-center p-2 rounded-lg w-10 ${d.isToday ? 'bg-gray-800 text-white' : ''}` }>
-                        <p className="text-xs font-medium text-gray-400">{d.day}</p>
-                        <p className="font-bold">{d.date}</p>
-                    </div>
-                ))}
-            </div>
 
             <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-gray-800">Reminders</h2>
@@ -87,52 +148,46 @@ const TodayView = () => {
                 </div>
             </div>
 
-            {/* Medication Reminders */}
-            {activeMedications.length > 0 && (
-                <div className="mb-6">
-                    <div className="flex items-center space-x-2 text-gray-500 mb-2">
-                        <AppIcon name="medication" className="w-5 h-5" />
-                        <h3 className="text-sm font-semibold">Medications</h3>
-                    </div>
-                    {activeMedications.map(med => {
-                        const medId = `med-${med.id}`;
-                        const isCompleted = todayCheckIns.some(
-                            checkIn => checkIn.category === 'Medications' && checkIn.data.name === med.name
+            {/* Medication Adherence Logging */}
+            <div className="mb-6">
+                <div className="flex items-center space-x-2 text-gray-500 mb-2">
+                    <AppIcon name="medication" className="w-5 h-5" />
+                    <h3 className="text-sm font-semibold">Today's Medication Schedules</h3>
+                </div>
+                {isAdherenceLoading || loadingSchedules ? (
+                    <div>Loading schedules...</div>
+                ) : todaySchedules.length === 0 ? (
+                    <div className="text-gray-500">No medication schedules for today.</div>
+                ) : (
+                    todaySchedules.map(sch => {
+                        const med = uniqueActiveMedications.find(m => m.id === sch.medication_id);
+                        // Compare local time strings for adherence matching
+                        const adherence = adherences.find(a => 
+                            a.medication_id === sch.medication_id && 
+                            new Date(a.scheduled_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) === sch.time_of_day
                         );
                         return (
-                            <div key={med.id} className="bg-white p-4 rounded-xl shadow-sm mb-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center flex-1">
-                                        <div className="w-12 text-sm font-semibold text-gray-700">{med.time}</div>
-                                        <div className="w-10 h-10 flex items-center justify-center rounded-lg mr-4 bg-violet-100">
-                                            <AppIcon name="medication" className="w-6 h-6 text-violet-600" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <span className={`font-medium text-gray-800 ${isCompleted ? 'line-through text-gray-400' : ''}`}>
-                                                {med.name}
-                                            </span>
-                                            <p className="text-xs text-gray-500">{med.dosage} - {med.frequency}</p>
-                                        </div>
+                            <div key={sch.id} className="bg-white p-4 rounded-xl shadow-sm mb-3 flex items-center justify-between">
+                                <div className="flex items-center">
+                                    <div className="w-12 text-sm font-semibold text-gray-700">{sch.time_of_day}</div>
+                                    <div className="w-10 h-10 flex items-center justify-center rounded-lg mr-4 bg-violet-100">
+                                        <AppIcon name="medication" className="w-6 h-6 text-violet-600" />
                                     </div>
-                                    {isCompleted ? (
-                                        <div className="w-6 h-6 rounded-md border-2 flex items-center justify-center bg-green-500 border-green-500">
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                        </div>
-                                    ) : (
-                                        <button 
-                                            onClick={() => handleMedicationCheck(med)} 
-                                            className="w-6 h-6 rounded-md border-2 border-gray-300 flex items-center justify-center transition-colors hover:border-blue-400 hover:bg-blue-50"
-                                        >
-                                        </button>
-                                    )}
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-gray-800">{med?.name || 'Medication'}</span>
+                                        <p className="text-xs text-gray-500">{med?.dosage || ''}</p>
+                                    </div>
                                 </div>
+                                {adherence ? (
+                                    <span className={`text-xs px-2 py-1 rounded ${adherence.status === 'taken' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                        {adherence.status === 'taken' ? 'Taken' : 'Skipped'}
+                                    </span>
+                                ) : null}
                             </div>
                         );
-                    })}
-                </div>
-            )}
+                    })
+                )}
+            </div>
 
             {/* Other Reminders */}
             {Object.entries(groupedReminders).map(([group, reminders]) => (
@@ -144,16 +199,20 @@ const TodayView = () => {
                     {reminders.map(reminder => (
                          <div key={reminder.id} className="bg-white p-4 rounded-xl shadow-sm mb-3">
                             <div className="flex items-center justify-between">
-                                <div className="flex items-center">
+                                <div className="flex items-center flex-1">
                                     <div className="w-12 text-sm font-semibold text-gray-700">{reminder.time}</div>
                                     <div className="w-10 h-10 flex items-center justify-center rounded-lg mr-4" style={{ backgroundColor: iconColors[reminder.color]?.bg || 'bg-gray-100' }}>
                                         <AppIcon name={reminder.icon} className="w-6 h-6" style={{ color: iconColors[reminder.color]?.text || 'text-gray-600' }} />
                                     </div>
-                                    <span className={`font-medium text-gray-800 ${checkedState[reminder.id] ? 'line-through text-gray-400' : ''}` }>{reminder.title}</span>
+                                    <span className="font-medium text-gray-800">{reminder.title}</span>
                                 </div>
-                                <button onClick={() => handleCheck(reminder.id)} className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors ${checkedState[reminder.id] ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}` }>
-                                    {checkedState[reminder.id] && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                                </button>
+                                {reminder.completed && (
+                                    <div className="w-6 h-6 rounded-md border-2 flex items-center justify-center bg-blue-500 border-blue-500">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -236,6 +295,7 @@ const TodayView = () => {
                     </div>
                 </div>
             )}
+
         </div>
     );
 };

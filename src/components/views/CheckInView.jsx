@@ -6,10 +6,11 @@ import { useCheckIn } from '../../context/CheckInContext';
 import { useAuth } from '../../context/AuthContext';
 import { mockCategories } from '../../data/mockData';
 import { categoryIconColors, iconColors } from '../../utils/iconColors';
+import { symptomAPI } from '../../services/api';
 
 const CheckInView = () => {
-    const { addCheckIn } = useCheckIn();
-    const { user } = useAuth();
+    const { addCheckIn, recordMedicationTaken } = useCheckIn();
+    const { user, selectedPatient } = useAuth();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState(null);
@@ -20,11 +21,39 @@ const CheckInView = () => {
         setIsModalOpen(true);
     };
 
-    const handleSave = (data) => {
-        addCheckIn(selectedCategory, data, user);
-        console.log('Saved data for', selectedCategory, 'by', user.name, ':', data);
-        // When you connect to FastAPI, replace addCheckIn with an API call:
-        // await fetch('/api/checkins', { method: 'POST', body: JSON.stringify({ category: selectedCategory, data, userId: user.id }) })
+    const handleSave = async (data) => {
+        try {
+            if (selectedCategory === 'Symptoms') {
+                const symptomType = data.symptom === 'Other' ? data.otherSymptom : data.symptom;
+                const payload = {
+                    user_id: user?.id,
+                    patient_id: selectedPatient?.id,
+                    symptom_type: symptomType,
+                    start_time: new Date().toISOString(),
+                    severity: Number(data.severity) || null,
+                    notes: data.description || data.notes || ''
+                };
+                await symptomAPI.create(payload);
+
+                const checkInData = {
+                    symptom: symptomType,
+                    severity: data.severity,
+                    notes: data.description
+                };
+                await addCheckIn(selectedCategory, checkInData, user);
+                console.log('Saved symptom log and created check-in');
+
+            } else if (selectedCategory === 'Medications') {
+                await recordMedicationTaken(data.medication_id, data.time, data.notes, user, selectedPatient);
+                console.log('Recorded medication adherence for', data.name, 'by', user?.name, ':', data);
+            } else {
+                await addCheckIn(selectedCategory, data, user);
+                console.log('Saved data for', selectedCategory, 'by', user?.name, ':', data);
+            }
+        } catch (error) {
+            console.error(`Failed to save ${selectedCategory}:`, error);
+            alert(`Failed to save ${selectedCategory}. Please try again.`);
+        }
     };
 
     return (
@@ -36,7 +65,7 @@ const CheckInView = () => {
                     className="flex items-center space-x-2 bg-white px-3 py-2 rounded-full shadow-sm text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0h18M12 15.75h.008v.008H12v-.008z" /></svg>
-                    <span>Manage Plan</span>
+                    <span>Manage Patient</span>
                     <div className="w-2 h-2 bg-red-500 rounded-full"></div>
                 </button>
             </header>

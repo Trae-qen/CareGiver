@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import AppIcon from './AppIcon';
 import { useCarePlan } from '../../context/CarePlanContext';
+import { commonSymptoms } from '../../data/mockData';
 
 const AddItemModal = ({ isOpen, onClose, category, onSave }) => {
     const { getActiveMedications } = useCarePlan();
@@ -11,16 +11,21 @@ const AddItemModal = ({ isOpen, onClose, category, onSave }) => {
     // Auto-fill dosage when medication is selected
     useEffect(() => {
         if (selectedMedication) {
-            const med = activeMedications.find(m => m.name === selectedMedication);
-            if (med) {
+            const med = activeMedications.find(m => m.id === parseInt(selectedMedication));
+
+            // ONLY update state if a med is found AND
+            // the form data is different from the med data.
+            if (med && (formData.medication_id !== med.id || formData.name !== med.name || formData.dosage !== med.dosage)) {
                 setFormData(prev => ({
                     ...prev,
+                    medication_id: med.id,
                     name: med.name,
                     dosage: med.dosage
                 }));
             }
         }
-    }, [selectedMedication, activeMedications]);
+    // Add formData.name and formData.dosage to the dependency array
+    }, [selectedMedication, activeMedications, formData.name, formData.dosage]);
 
     if (!isOpen) return null;
 
@@ -46,7 +51,7 @@ const AddItemModal = ({ isOpen, onClose, category, onSave }) => {
                             >
                                 <option value="">Choose from patient's medications...</option>
                                 {activeMedications.map(med => (
-                                    <option key={med.id} value={med.name}>
+                                    <option key={med.id} value={med.id}>
                                         {med.name} - {med.dosage}
                                     </option>
                                 ))}
@@ -101,14 +106,32 @@ const AddItemModal = ({ isOpen, onClose, category, onSave }) => {
                     <>
                         <div className="mb-4">
                             <label className="block text-sm font-medium text-gray-700 mb-2">Symptom</label>
-                            <input
-                                type="text"
+                            <select
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                placeholder="e.g., Headache"
                                 value={formData.symptom || ''}
                                 onChange={(e) => setFormData({ ...formData, symptom: e.target.value })}
-                            />
+                            >
+                                <option value="">Select a symptom...</option>
+                                {commonSymptoms.map((s, idx) => (
+                                    <option key={idx} value={s}>{s}</option>
+                                ))}
+                                <option value="Other">Other</option>
+                            </select>
                         </div>
+
+                        {formData.symptom === 'Other' && (
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Other Symptom</label>
+                                <input
+                                    type="text"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="Describe the symptom..."
+                                    value={formData.otherSymptom || ''}
+                                    onChange={(e) => setFormData({ ...formData, otherSymptom: e.target.value })}
+                                />
+                            </div>
+                        )}
+
                         <div className="mb-4">
                             <label className="block text-sm font-medium text-gray-700 mb-2">Severity (1-10)</label>
                             <input

@@ -1,3 +1,13 @@
+// PDF Report API
+export const reportAPI = {
+    generate: async ({ patient_id, from_date, to_date }) => {
+        const url = `${BASE_URL}${API_PREFIX}/reports/generate?patient_id=${patient_id}&from_date=${from_date}&to_date=${to_date}`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to generate report');
+        const blob = await response.blob();
+        return blob;
+    },
+};
 // API service for connecting to FastAPI backend
 // Update the BASE_URL when you deploy your FastAPI server
 
@@ -154,6 +164,63 @@ export const medicationAPI = {
     },
 };
 
+// Medication Schedule API endpoints
+export const medicationScheduleAPI = {
+    create: async (scheduleData) => {
+        return fetchAPI('/medication-schedules', {
+            method: 'POST',
+            body: JSON.stringify(scheduleData),
+        });
+    },
+    getAll: async (params = {}) => {
+        const urlParams = new URLSearchParams(params).toString();
+        return fetchAPI(`/medication-schedules?${urlParams}`);
+    },
+    update: async (id, updates) => {
+        return fetchAPI(`/medication-schedules/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates),
+        });
+    },
+    delete: async (id) => {
+        return fetchAPI(`/medication-schedules/${id}`, {
+            method: 'DELETE',
+        });
+    },
+};
+
+// Medication Adherence API endpoints
+export const medicationAdherenceAPI = {
+    create: async (adherenceData) => {
+        return fetchAPI('/medication-adherence', {
+            method: 'POST',
+            body: JSON.stringify(adherenceData),
+        });
+    },
+    getAll: async (params = {}) => {
+        const urlParams = new URLSearchParams(params).toString();
+        return fetchAPI(`/medication-adherence?${urlParams}`);
+    },
+};
+
+// Symptom API endpoints
+export const symptomAPI = {
+    create: async (symptomData) => {
+        return fetchAPI('/symptom-logs', {
+            method: 'POST',
+            body: JSON.stringify(symptomData),
+        });
+    },
+    list: async (params = {}) => {
+        const urlParams = new URLSearchParams(params).toString();
+        return fetchAPI(`/symptom-logs?${urlParams}`);
+    },
+    aggregate: async (params = {}) => {
+        const urlParams = new URLSearchParams(params).toString();
+        return fetchAPI(`/reports/symptom-agg?${urlParams}`);
+    }
+};
+
 // Reminders API endpoints
 export const remindersAPI = {
     getAll: async () => {
@@ -203,5 +270,9 @@ export default {
     checkInAPI,
     patientAPI,
     medicationAPI,
+    medicationScheduleAPI,
+    medicationAdherenceAPI,
     remindersAPI,
+    symptomAPI,
+    reportAPI,
 };

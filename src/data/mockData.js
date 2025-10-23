@@ -15,3 +15,16 @@ export const mockReminders = [
     { id: 2, time: '12:00 PM', title: 'Hydration Break', icon: 'hydration', color: 'blue', group: 'Noon' },
     { id: 3, time: '8:00 PM', title: 'Evening Reflection', icon: 'reflection', color: 'purple', group: 'Evening' },
 ];
+
+export const commonSymptoms = [
+    'Headache',
+    'Nausea',
+    'Dizziness',
+    'Shortness of Breath',
+    'Cough',
+    'Fever',
+    'Fatigue',
+    'Pain',
+    'Swelling',
+    'Rash'
+];

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { CheckInProvider } from './context/CheckInContext';
+import { CheckInProvider, useCheckIn } from './context/CheckInContext';
 import { CarePlanProvider } from './context/CarePlanContext';
 import TopBar from './components/common/TopBar';
 import AppIcon from './components/common/AppIcon';
@@ -9,12 +9,14 @@ import CheckInView from './components/views/CheckInView';
 import TimelineView from './components/views/TimelineView';
 import InsightsView from './components/views/InsightsView';
 import MoreView from './components/views/MoreView';
+import AdminView from './components/views/AdminView';
 import LoginView from './components/views/LoginView';
 import { PatientSelectionView } from './views/PatientSelectionView';
 import './App.css';
 
 function AppContent() {
-    const { isAuthenticated, isLoading, selectedPatient } = useAuth();
+    const { isAuthenticated, isLoading, selectedPatient, user } = useAuth();
+    const { adherences } = useCheckIn();
     const [activeView, setActiveView] = useState('Today');
 
     if (isLoading) {
@@ -37,6 +39,7 @@ function AppContent() {
         return <PatientSelectionView />;
     }
 
+
     const renderView = () => {
         switch (activeView) {
             case 'Today':
@@ -45,8 +48,10 @@ function AppContent() {
                 return <CheckInView />;
             case 'Timeline':
                 return <TimelineView />;
+            case 'Admin':
+                return <AdminView />;
             case 'Insights':
-                return <InsightsView showEmptyState={true} />;
+                return <InsightsView showEmptyState={adherences.length === 0} />;
             case 'More':
                 return <MoreView />;
             default:
@@ -54,13 +59,18 @@ function AppContent() {
         }
     };
     
-    const navItems = [
+    const baseNav = [
         { name: 'Today', icon: 'today' },
         { name: 'Timeline', icon: 'timeline' },
         { name: 'Check-in', icon: 'check-in' },
         { name: 'Insights', icon: 'insights' },
-        { name: 'More', icon: 'more' }
     ];
+
+    const navItems = [...baseNav];
+    if (user?.role === 'Admin') {
+        navItems.push({ name: 'Admin', icon: 'admin' });
+    }
+    navItems.push({ name: 'More', icon: 'more' });
 
     return (
         <div className="w-full h-screen md:max-w-md md:mx-auto bg-gray-50 font-sans leading-normal tracking-normal md:shadow-2xl md:rounded-3xl overflow-hidden md:border md:border-gray-200 md:my-4" style={{ maxHeight: '100vh' }}>

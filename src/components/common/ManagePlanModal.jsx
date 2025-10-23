@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { medicationScheduleAPI } from '../../services/api';
 import AppIcon from './AppIcon';
 import { useCarePlan } from '../../context/CarePlanContext';
+import { useAuth } from '../../context/AuthContext';
 
 const ManagePlanModal = ({ isOpen, onClose }) => {
     const { medications, patientInfo, updateMedication, updatePatientInfo, addMedication, deleteMedication } = useCarePlan();
+    const { user, selectedPatient } = useAuth();
     const [activeTab, setActiveTab] = useState('overview');
     const [showAddMedModal, setShowAddMedModal] = useState(false);
     const [newMedication, setNewMedication] = useState({
@@ -12,6 +15,29 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
         frequency: 'Daily',
         time: '08:00'
     });
+
+    // --- MOVED HOOKS START ---
+    // These hooks must be called before any conditional returns.
+    
+    // Medication schedule state
+    const [schedules, setSchedules] = useState([]);
+    const [loadingSchedules, setLoadingSchedules] = useState(true);
+    const [showAddSchedule, setShowAddSchedule] = useState(false);
+    const [newSchedule, setNewSchedule] = useState({
+        medication_id: '',
+        time_of_day: '08:00',
+        recurrence_rule: 'daily',
+        notes: ''
+    });
+
+    useEffect(() => {
+        if (activeTab === 'schedule') {
+            setLoadingSchedules(true);
+            medicationScheduleAPI.getAll().then(setSchedules).finally(() => setLoadingSchedules(false));
+        }
+    }, [activeTab]);
+    // --- MOVED HOOKS END ---
+
 
     if (!isOpen) return null;
 
@@ -171,36 +197,117 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
         </div>
     );
 
+
+    const handleAddSchedule = async () => {
+        if (!newSchedule.medication_id || !newSchedule.time_of_day) return;
+        // Ensure user_id and patient_id are included
+        const scheduleWithIds = {
+            ...newSchedule,
+            user_id: user?.id,
+            patient_id: selectedPatient?.id
+        };
+        await medicationScheduleAPI.create(scheduleWithIds);
+        setShowAddSchedule(false);
+        setNewSchedule({ medication_id: '', time_of_day: '08:00', recurrence_rule: 'daily', notes: '' });
+        setLoadingSchedules(true);
+        medicationScheduleAPI.getAll().then(setSchedules).finally(() => setLoadingSchedules(false));
+    };
+
+    const handleDeleteSchedule = async (id) => {
+        await medicationScheduleAPI.delete(id);
+        setLoadingSchedules(true);
+        medicationScheduleAPI.getAll().then(setSchedules).finally(() => setLoadingSchedules(false));
+    };
+
     const renderSchedule = () => (
         <div className="space-y-4">
             <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h3 className="font-semibold text-gray-900 mb-3">Daily Check-ins</h3>
-                <div className="space-y-3">
-                    {[
-                        { category: 'Medications', time: '8:00 AM, 8:00 PM', enabled: true },
-                        { category: 'Measurements', time: '12:00 PM', enabled: true },
-                        { category: 'Mood', time: '9:00 AM, 6:00 PM', enabled: true },
-                        { category: 'Symptoms', time: 'As needed', enabled: true },
-                        { category: 'Activity', time: '3:00 PM', enabled: false },
-                        { category: 'Tasks', time: 'Throughout day', enabled: true },
-                    ].map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between py-2 border-b last:border-b-0">
-                            <div>
-                                <p className="font-medium text-gray-800">{item.category}</p>
-                                <p className="text-xs text-gray-500">{item.time}</p>
+                <h3 className="font-semibold text-gray-900 mb-3">Medication Schedules</h3>
+                {loadingSchedules ? (
+                    <div>Loading schedules...</div>
+                ) : (
+                    <div className="space-y-3">
+                        {schedules.length === 0 && <div className="text-gray-500">No schedules found.</div>}
+                        {schedules.map(sch => (
+                            <div key={sch.id} className="flex items-center justify-between border-b py-2 last:border-b-0">
+                                <div>
+                                    <div className="font-medium text-gray-800">{medications.find(m => m.id === sch.medication_id)?.name || 'Medication'} at {sch.time_of_day}</div>
+                                    <div className="text-xs text-gray-500">{sch.recurrence_rule} {sch.notes && `- ${sch.notes}`}</div>
+                                </div>
+                                <button onClick={() => handleDeleteSchedule(sch.id)} className="text-red-500 hover:underline text-xs">Delete</button>
                             </div>
-                            <label className="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" defaultChecked={item.enabled} className="sr-only peer" />
-                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                            </label>
-                        </div>
-                    ))}
-                </div>
+                        ))}
+                    </div>
+                )}
             </div>
-
-            <button className="w-full bg-blue-500 text-white py-3 rounded-lg font-semibold hover:bg-blue-600 transition-colors">
-                Add Custom Schedule
+            <button onClick={() => setShowAddSchedule(true)} className="w-full bg-blue-500 text-white py-3 rounded-lg font-semibold hover:bg-blue-600 transition-colors">
+                Add Medication Schedule
             </button>
+            {showAddSchedule && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full m-4">
+                        <div className="bg-gradient-to-r from-violet-500 to-purple-600 text-white p-4 rounded-t-2xl">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-xl font-bold">Add Medication Schedule</h3>
+                                <button onClick={() => setShowAddSchedule(false)} className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-1 transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Medication *</label>
+                                <select
+                                    value={newSchedule.medication_id}
+                                    onChange={e => setNewSchedule({ ...newSchedule, medication_id: Number(e.target.value) })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                >
+                                    <option value="">Select medication...</option>
+                                    {medications.map(med => (
+                                        <option key={med.id} value={med.id}>{med.name} ({med.dosage})</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Time of Day *</label>
+                                <input
+                                    type="time"
+                                    value={newSchedule.time_of_day}
+                                    onChange={e => setNewSchedule({ ...newSchedule, time_of_day: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Recurrence</label>
+                                <select
+                                    value={newSchedule.recurrence_rule}
+                                    onChange={e => setNewSchedule({ ...newSchedule, recurrence_rule: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                >
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="as_needed">As Needed</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+                                <input
+                                    type="text"
+                                    value={newSchedule.notes}
+                                    onChange={e => setNewSchedule({ ...newSchedule, notes: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                />
+                            </div>
+                            <div className="flex space-x-3 pt-4">
+                                <button onClick={() => setShowAddSchedule(false)} className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors">Cancel</button>
+                                <button onClick={handleAddSchedule} disabled={!newSchedule.medication_id || !newSchedule.time_of_day} className="flex-1 px-4 py-3 bg-violet-600 text-white font-semibold rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Add Schedule</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 
@@ -285,8 +392,8 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
                 <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-t-2xl">
                     <div className="flex items-center justify-between">
                         <div>
-                            <h2 className="text-2xl font-bold">Manage Care Plan</h2>
-                            <p className="text-blue-100 text-sm mt-1">Configure patient care and medications</p>
+                            <h2 className="text-2xl font-bold">Manage Patient</h2>
+                            <p className="text-blue-100 text-sm mt-1">Configure patient information, care and medications</p>
                         </div>
                         <button
                             onClick={onClose}
