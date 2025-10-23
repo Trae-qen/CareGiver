@@ -543,30 +543,53 @@ def get_checkins(
     patient_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    query = db.query(CheckIn)
-    
-    if date:
-        # Filter by date
-        try:
-            date_obj = datetime.strptime(date, "%Y-%m-%d")
-            query = query.filter(
-                CheckIn.timestamp >= date_obj,
-                CheckIn.timestamp < datetime(date_obj.year, date_obj.month, date_obj.day + 1)
-            )
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-    
-    if category:
-        query = query.filter(CheckIn.category == category)
-    
-    if user_id:
-        query = query.filter(CheckIn.user_id == user_id)
-    
+    # Query for standard check-ins
+    checkin_query = db.query(CheckIn)
     if patient_id:
-        query = query.filter(CheckIn.patient_id == patient_id)
+        checkin_query = checkin_query.filter(CheckIn.patient_id == patient_id)
+    if user_id:
+        checkin_query = checkin_query.filter(CheckIn.user_id == user_id)
+    if category:
+        checkin_query = checkin_query.filter(CheckIn.category == category)
     
-    checkins = query.order_by(CheckIn.timestamp.desc()).all()
-    return checkins
+    # Query for symptom logs and transform them into a check-in-like structure
+    symptom_query = db.query(SymptomLog)
+    if patient_id:
+        symptom_query = symptom_query.filter(SymptomLog.patient_id == patient_id)
+    if user_id:
+        symptom_query = symptom_query.filter(SymptomLog.user_id == user_id)
+
+    # Combine results
+    all_checkins = checkin_query.all()
+    symptom_logs = symptom_query.all()
+
+    # Convert symptom logs to a common format
+    transformed_symptoms = []
+    for log in symptom_logs:
+        transformed_symptoms.append(CheckIn(
+            id=log.id,  # Note: This might cause ID conflicts if not handled on frontend
+            user_id=log.user_id,
+            patient_id=log.patient_id,
+            category="Symptoms",
+            data={
+                "symptom": log.symptom_type,
+                "severity": log.severity,
+                "notes": log.notes,
+                "start_time": log.start_time.isoformat(),
+                "end_time": log.end_time.isoformat() if log.end_time else None,
+            },
+            timestamp=log.start_time,
+            created_at=log.created_at,
+            user=log.user,
+            patient=log.patient
+        ))
+
+    combined_results = all_checkins + transformed_symptoms
+    
+    # Sort by timestamp descending
+    combined_results.sort(key=lambda x: x.timestamp, reverse=True)
+    
+    return combined_results
 
 @app.get("/api/checkins/{checkin_id}", response_model=CheckInResponse)
 def get_checkin(checkin_id: int, db: Session = Depends(get_db)):
