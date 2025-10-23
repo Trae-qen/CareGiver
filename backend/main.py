@@ -191,7 +191,6 @@ class CheckInCreate(BaseModel):
     patient_id: int
     category: str
     data: dict
-    event_time: Optional[datetime] = None
 
 class CheckInResponse(BaseModel):
     id: int
@@ -527,59 +526,10 @@ def update_patient(patient_id: int, updates: PatientCreate, db: Session = Depend
     db.refresh(patient)
     return patient
 
+# Check-in endpoints
 @app.post("/api/checkins", response_model=CheckInResponse)
 def create_checkin(checkin: CheckInCreate, db: Session = Depends(get_db)):
-    
-    # Exclude event_time from the initial dict, as it's not a DB column
-    db_checkin = CheckIn(**checkin.dict(exclude={"event_time"}))
-    
-    # Use a single consistent "now" for the log time
-    log_time = datetime.utcnow()
-    db_checkin.created_at = log_time # Explicitly set creation time
-
-    # --- START: Corrected Event Time Logic ---
-    event_time_to_set = None
-
-    if checkin.event_time:
-        # 1. Best case: Frontend sent the exact, correct event time.
-        event_time_to_set = checkin.event_time
-    
-    elif checkin.data:
-        # Get the time string from the data dict
-        time_str = checkin.data.get("time")
-        #Fix
-        # This explicit check satisfies Pylance.
-        # It now knows time_str is a 'str' inside this block.
-        if isinstance(time_str, str) and ":" in time_str:
-            # 2. Fallback: Re-create the day-boundary logic on the backend.
-            try:
-                hours, minutes = map(int, time_str.split(':'))
-                
-                # Start with the log time, then set the correct hour/minute
-                event_date = log_time.replace(hour=hours, minute=minutes, second=0, microsecond=0)
-                
-                # The day-boundary check:
-                # If logged in early AM (log_hour < 5) for a late PM event (hours >= 18)
-                # ...then assume it was for the previous day.
-                log_hour = log_time.hour
-                if log_hour < 5 and hours >= 18:
-                    event_date = event_date - timedelta(days=1)
-                    
-                event_time_to_set = event_date
-            except Exception:
-                # On error (e.g., bad time string "12:abc"), just use the log time
-                event_time_to_set = log_time
-        else:
-            # 3. Default: data.time was missing, None, or not a string. Use log time.
-            event_time_to_set = log_time
-    else:
-        # 3. Default: No 'data' field at all. Use log time.
-        event_time_to_set = log_time
-
-    # Set the 'timestamp' column to the *correct* event time
-    db_checkin.timestamp = event_time_to_set
-    # --- END: Corrected Event Time Logic ---
-
+    db_checkin = CheckIn(**checkin.dict())
     db.add(db_checkin)
     db.commit()
     db.refresh(db_checkin)
