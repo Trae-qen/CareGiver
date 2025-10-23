@@ -547,7 +547,7 @@ def create_checkin(checkin: CheckInCreate, db: Session = Depends(get_db)):
     elif checkin.data:
         # Get the time string from the data dict
         time_str = checkin.data.get("time")
-        
+        #Fix
         # This explicit check satisfies Pylance.
         # It now knows time_str is a 'str' inside this block.
         if isinstance(time_str, str) and ":" in time_str:
