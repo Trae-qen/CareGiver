@@ -548,7 +548,7 @@ def get_checkins(
     db: Session = Depends(get_db)
 ):
     # Query for standard check-ins
-    checkin_query = db.query(CheckIn)
+    checkin_query = db.query(CheckIn).filter(CheckIn.category != "Symptoms")
     if patient_id:
         checkin_query = checkin_query.filter(CheckIn.patient_id == patient_id)
     if user_id:
