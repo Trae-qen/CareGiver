@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from pydantic import BaseModel, EmailStr
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import tempfile
 import io
 from reportlab.lib.pagesizes import letter
@@ -30,6 +30,9 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+def now_utc():
+    return datetime.now(timezone.utc)
+
 # Database Models
 class Patient(Base):
     __tablename__ = "patients"
@@ -40,8 +43,8 @@ class Patient(Base):
     allergies = Column(String)
     emergency_contact = Column(String)
     doctor = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     
     medications = relationship("Medication", back_populates="patient")
     checkins = relationship("CheckIn", back_populates="patient")
@@ -53,8 +56,8 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     role = Column(String, default="aide")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_login = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    last_login = Column(DateTime(timezone=True))
     
     checkins = relationship("CheckIn", back_populates="user")
 
@@ -66,8 +69,8 @@ class CheckIn(Base):
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     category = Column(String, nullable=False)
     data = Column(JSON, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), default=now_utc)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
     
     user = relationship("User", back_populates="checkins")
     patient = relationship("Patient", back_populates="checkins")
@@ -82,7 +85,7 @@ class Medication(Base):
     frequency = Column(String, nullable=False)
     time = Column(String, nullable=False)
     active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
     
     patient = relationship("Patient", back_populates="medications")
 
@@ -100,7 +103,7 @@ class MedicationSchedule(Base):
     next_run = Column(DateTime, nullable=True)
     active = Column(Boolean, default=True)
     notes = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
 
     medication = relationship("Medication")
     user = relationship("User")
@@ -114,11 +117,11 @@ class MedicationAdherence(Base):
     medication_id = Column(Integer, ForeignKey("medications.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)
-    scheduled_time = Column(DateTime, nullable=False)
-    taken_time = Column(DateTime, nullable=True)
+    scheduled_time = Column(DateTime(timezone=True), nullable=False)
+    taken_time = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, nullable=False)  # 'taken', 'skipped', 'late', etc.
     notes = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
 
     medication = relationship("Medication")
     user = relationship("User")
@@ -132,11 +135,11 @@ class SymptomLog(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)
     symptom_type = Column(String, nullable=False)
-    start_time = Column(DateTime, nullable=False)
-    end_time = Column(DateTime, nullable=True)
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=True)
     severity = Column(Integer, nullable=True)
     notes = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
 
     user = relationship("User")
     patient = relationship("Patient")
@@ -151,7 +154,7 @@ class PatientInfo(Base):
     allergies = Column(String)
     emergency_contact = Column(String)
     doctor = Column(String)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 # Pydantic Models
 class PatientCreate(BaseModel):
@@ -384,7 +387,7 @@ def generate_pdf_report(
     c.setFont('Helvetica', 10)
     c.drawString(40, height - 60, f'Patient ID: {patient_id}')
     c.drawString(40, height - 75, f'Date Range: {from_date} to {to_date}')
-    c.drawString(40, height - 90, f'Generated: {datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}')
+    c.drawString(40, height - 90, f'Generated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}')
 
     # Insert chart image
     c.drawImage(ImageReader(img_buf), 40, height - 300, width=500, height=120)
@@ -469,7 +472,7 @@ def login(email: EmailStr, db: Session = Depends(get_db)):
         db.refresh(user)
     
     # Update last login
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     db.commit()
     
     return user
@@ -522,7 +525,7 @@ def update_patient(patient_id: int, updates: PatientCreate, db: Session = Depend
     for key, value in updates.dict(exclude_unset=True).items():
         setattr(patient, key, value)
     
-    patient.updated_at = datetime.utcnow()
+    patient.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(patient)
     return patient
@@ -877,7 +880,7 @@ def update_patient_info(patient_info: PatientInfoUpdate, db: Session = Depends(g
     for key, value in patient_info.dict(exclude_unset=True).items():
         setattr(patient, key, value)
     
-    patient.updated_at = datetime.utcnow()
+    patient.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(patient)
     return patient
