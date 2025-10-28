@@ -15,7 +15,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 from typing import Optional, List, Any
 import os
 from dotenv import load_dotenv
