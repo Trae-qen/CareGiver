@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from typing import Optional, List, Any
 import os
 from dotenv import load_dotenv
+import logging
 
 
 # Load environment variables from .env file
@@ -353,152 +354,179 @@ def generate_pdf_report(
     to_date: str,
     db: Session = Depends(get_db)
 ):
-    # --- 1. DATA FETCHING (Same as before) ---
-    from_dt = datetime.strptime(from_date, "%Y-%m-%d")
-    to_dt = datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1)
-    symptoms = db.query(SymptomLog).filter(
-        SymptomLog.patient_id == patient_id,
-        SymptomLog.start_time >= from_dt,
-        SymptomLog.start_time < to_dt
-    ).all()
-    adherence = db.query(MedicationAdherence).filter(
-        MedicationAdherence.patient_id == patient_id,
-        MedicationAdherence.scheduled_time >= from_dt,
-        MedicationAdherence.scheduled_time < to_dt
-    ).all()
-
-    # --- 2. MATPLOTLIB CHART (Same as before) ---
-    img_buf = io.BytesIO() 
-
-    # if symptoms: 
-    #     symptom_counts = {}
-    #     for log in symptoms:
-    #         day = log.start_time.strftime('%Y-%m-%d')
-    #         symptom_counts.setdefault(day, 0)
-    #         symptom_counts[day] += 1
-    #     days = sorted(symptom_counts.keys())
-    #     counts = [symptom_counts[day] for day in days]
-
-    #     if days: 
-    #         fig, ax = plt.subplots(figsize=(6, 2.5))
-    #         ax.bar(days, counts)
-    #         ax.set_title('Symptom Logs per Day')
-    #         ax.set_xlabel('Date')
-    #         ax.set_ylabel('Count')
-    #         plt.xticks(rotation=45, ha='right')
-    #         plt.tight_layout()
-    #         plt.savefig(img_buf, format='png')
-    #         plt.close(fig)
-
-    img_buf.seek(0) 
-
-    # --- 3. PDF GENERATION (Modified for in-memory) ---
-
-    pdf_buf = io.BytesIO()
-    
-    doc = SimpleDocTemplate(pdf_buf, pagesize=letter,
-                            rightMargin=0.75*inch, leftMargin=0.75*inch,
-                            topMargin=0.75*inch, bottomMargin=0.75*inch)
-    
-    story = []
-    
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='Title', fontSize=22, alignment=1, spaceAfter=14))
-    styles.add(ParagraphStyle(name='Header', fontSize=14, spaceAfter=12))
-    
-    # --- Title and Report Info (Same as before) ---
-    story.append(Paragraph("Patient Report", styles['Title']))
-    story.append(Paragraph(f"<b>Patient ID:</b> {patient_id}", styles['Normal']))
-    story.append(Paragraph(f"<b>Date Range:</b> {from_date} to {to_date}", styles['Normal']))
-    story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
-    story.append(Spacer(1, 0.25 * inch))
-
-    # --- Add Chart (Same as before) ---
-    story.append(Paragraph("Symptom Log Frequency", styles['Header']))
-    
-    if symptoms: 
-        story.append(Image(img_buf, width=7*inch, height=2.8*inch))
-    else: 
-        story.append(Paragraph("<i>No symptom data to display in chart.</i>", styles['Normal']))
+    try:
+        # --- 1. DATA FETCHING ---
+        logging.info(f"Generating report for patient {patient_id} from {from_date} to {to_date}")
+        from_dt = datetime.strptime(from_date, "%Y-%m-%d")
+        to_dt = datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1)
         
-    story.append(Spacer(1, 0.25 * inch))
-    
-    # --- Symptom Log Table (Same as before) ---
-    story.append(Paragraph("Symptom Logs", styles['Header']))
-    
-    symptom_data: list[list[Any]] = [["Date/Time", "Symptom", "Severity", "Notes"]]
-    
-    if not symptoms:
-        symptom_data.append(["-", "No symptom logs for this period", "-", "-"])
-    
-    for log in symptoms:
-        symptom_data.append([
-            log.start_time.strftime('%Y-%m-%d %H:%M'),
-            Paragraph(log.symptom_type, styles['Normal']),
-            str(log.severity or '-'),
-            Paragraph(log.notes or '', styles['Normal']) 
-        ])
-
-    symptom_table = Table(symptom_data, colWidths=[1.5*inch, 1.5*inch, 0.75*inch, 3.25*inch])
-    symptom_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4A90E2")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F8FF")),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#C2DFFF")),
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 1), (2, -1), 'CENTER'),
-    ]))
-    story.append(symptom_table)
-    story.append(PageBreak()) 
-
-    # --- Medication Adherence Table (Same as before) ---
-    story.append(Paragraph("Medication Adherence", styles['Header']))
-    
-    adherence_data: list[list[Any]] = [["Scheduled Time", "Status", "Notes"]]
-    
-    if not adherence:
-        adherence_data.append(["-", "No adherence logs for this period", "-"])
+        symptoms = db.query(SymptomLog).filter(
+            SymptomLog.patient_id == patient_id,
+            SymptomLog.start_time >= from_dt,
+            SymptomLog.start_time < to_dt
+        ).order_by(SymptomLog.start_time.asc()).all()
         
-    for log in adherence:
-        adherence_data.append([
-            log.scheduled_time.strftime('%Y-%m-%d %H:%M'),
-            log.status.title(),
-            Paragraph(log.notes or '', styles['Normal'])
-        ])
-    
-    adherence_table = Table(adherence_data, colWidths=[1.5*inch, 1*inch, 4.5*inch])
-    adherence_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34A853")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F1FBF4")),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#BDE9C7")),
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 1), (1, -1), 'CENTER'),
-    ]))
-    story.append(adherence_table)
-    
-    # --- Build the PDF ---
-    doc.build(story)
-    
-    pdf_buf.seek(0)
-    
-    return StreamingResponse(
-        pdf_buf, 
-        media_type='application/pdf', 
-        headers={
-            'Content-Disposition': 'attachment; filename="patient_report.pdf"'
-        }
-    )
+        adherence = db.query(MedicationAdherence).filter(
+            MedicationAdherence.patient_id == patient_id,
+            MedicationAdherence.scheduled_time >= from_dt,
+            MedicationAdherence.scheduled_time < to_dt
+        ).order_by(MedicationAdherence.scheduled_time.asc()).all()
+
+        # --- 2. MATPLOTLIB CHART (Defensive Block) ---
+        img_buf = io.BytesIO()
+        chart_generated_successfully = False
+
+        if symptoms:
+            try:
+                logging.info("Attempting to generate symptom chart...")
+                symptom_counts = {}
+                for log in symptoms:
+                    day = log.start_time.strftime('%Y-%m-%d')
+                    symptom_counts.setdefault(day, 0)
+                    symptom_counts[day] += 1
+                days = sorted(symptom_counts.keys())
+                counts = [symptom_counts[day] for day in days]
+
+                if days: 
+                    fig, ax = plt.subplots(figsize=(6, 2.5))
+                    ax.bar(days, counts)
+                    ax.set_title('Symptom Logs per Day')
+                    ax.set_xlabel('Date')
+                    ax.set_ylabel('Count')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
+                    plt.savefig(img_buf, format='png')
+                    plt.close(fig)
+                    chart_generated_successfully = True
+                    logging.info("Symptom chart generated successfully.")
+                else:
+                    logging.info("No day data to plot, skipping chart.")
+            
+            except Exception as e:
+                # Log the error, but don't crash the entire report
+                logging.error(f"Matplotlib chart generation FAILED: {e}", exc_info=True)
+                # This often happens on servers without system font/graphics libraries.
+                # See my previous message about 'nixpacks.toml' to fix this.
+
+        img_buf.seek(0) 
+
+        # --- 3. PDF GENERATION (In-Memory) ---
+        logging.info("Starting PDF document build...")
+        pdf_buf = io.BytesIO()
+        doc = SimpleDocTemplate(pdf_buf, pagesize=letter,
+                                rightMargin=0.75*inch, leftMargin=0.75*inch,
+                                topMargin=0.75*inch, bottomMargin=0.75*inch)
+        
+        story = []
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name='Title', fontSize=22, alignment=1, spaceAfter=14))
+        styles.add(ParagraphStyle(name='Header', fontSize=14, spaceAfter=12))
+
+        # --- Title and Report Info ---
+        story.append(Paragraph("Patient Report", styles['Title']))
+        story.append(Paragraph(f"<b>Patient ID:</b> {patient_id}", styles['Normal']))
+        story.append(Paragraph(f"<b>Date Range:</b> {from_date} to {to_date}", styles['Normal']))
+        story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
+        story.append(Spacer(1, 0.25 * inch))
+
+        # --- Add Chart (Only if it was successful) ---
+        story.append(Paragraph("Symptom Log Frequency", styles['Header']))
+        
+        if chart_generated_successfully:
+            story.append(Image(img_buf, width=7*inch, height=2.8*inch))
+        elif not symptoms:
+            story.append(Paragraph("<i>No symptom data recorded for this period.</i>", styles['Normal']))
+        else:
+            story.append(Paragraph("<i>Chart could not be generated due to a server error.</i>", styles['Normal']))
+            
+        story.append(Spacer(1, 0.25 * inch))
+        
+        # --- Symptom Log Table ---
+        story.append(Paragraph("Symptom Logs", styles['Header']))
+        symptom_data: list[list[Any]] = [["Date/Time", "Symptom", "Severity", "Notes"]]
+        
+        if not symptoms:
+            symptom_data.append(["-", "No symptom logs for this period", "-", "-"])
+        else:
+            for log in symptoms:
+                symptom_data.append([
+                    log.start_time.strftime('%Y-%m-%d %H:%M'),
+                    Paragraph(log.symptom_type, styles['Normal']),
+                    str(log.severity or '-'),
+                    Paragraph(log.notes or '', styles['Normal']) 
+                ])
+
+        symptom_table = Table(symptom_data, colWidths=[1.5*inch, 1.5*inch, 0.75*inch, 3.25*inch])
+        symptom_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4A90E2")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F8FF")),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#C2DFFF")),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 1), (2, -1), 'CENTER'),
+        ]))
+        story.append(symptom_table)
+        story.append(PageBreak()) 
+
+        # --- Medication Adherence Table ---
+        story.append(Paragraph("Medication Adherence", styles['Header']))
+        adherence_data: list[list[Any]] = [["Scheduled Time", "Status", "Notes"]]
+        
+        if not adherence:
+            adherence_data.append(["-", "No adherence logs for this period", "-"])
+        else:
+            for log in adherence:
+                adherence_data.append([
+                    log.scheduled_time.strftime('%Y-%m-%d %H:%M'),
+                    log.status.title(),
+                    Paragraph(log.notes or '', styles['Normal'])
+                ])
+        
+        adherence_table = Table(adherence_data, colWidths=[1.5*inch, 1*inch, 4.5*inch])
+        adherence_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34A853")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F1FBF4")),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#BDE9C7")),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 1), (1, -1), 'CENTER'),
+        ]))
+        story.append(adherence_table)
+        
+        # --- Build the PDF ---
+        logging.info("Building PDF story...")
+        doc.build(story)
+        
+        pdf_buf.seek(0)
+        logging.info("PDF built successfully. Returning StreamingResponse.")
+        
+        return StreamingResponse(
+            pdf_buf, 
+            media_type='application/pdf', 
+            headers={
+                'Content-Disposition': 'attachment; filename="patient_report.pdf"'
+            }
+        )
+
+    except Exception as e:
+        # ---!! THIS IS THE MOST IMPORTANT PART !! ---
+        # If ANYTHING fails, log the full error and return a proper 500
+        # This allows the frontend to get a JSON response and avoids the CORS error
+        logging.error(f"CRITICAL: Report generation failed with uncaught exception: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"An internal error occurred during PDF generation: {e}"
+        )
     
 # Startup event to create database tables
 @app.on_event("startup")
