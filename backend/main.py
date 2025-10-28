@@ -370,25 +370,25 @@ def generate_pdf_report(
     # --- 2. MATPLOTLIB CHART (Same as before) ---
     img_buf = io.BytesIO() 
 
-    if symptoms: 
-        symptom_counts = {}
-        for log in symptoms:
-            day = log.start_time.strftime('%Y-%m-%d')
-            symptom_counts.setdefault(day, 0)
-            symptom_counts[day] += 1
-        days = sorted(symptom_counts.keys())
-        counts = [symptom_counts[day] for day in days]
+    # if symptoms: 
+    #     symptom_counts = {}
+    #     for log in symptoms:
+    #         day = log.start_time.strftime('%Y-%m-%d')
+    #         symptom_counts.setdefault(day, 0)
+    #         symptom_counts[day] += 1
+    #     days = sorted(symptom_counts.keys())
+    #     counts = [symptom_counts[day] for day in days]
 
-        if days: 
-            fig, ax = plt.subplots(figsize=(6, 2.5))
-            ax.bar(days, counts)
-            ax.set_title('Symptom Logs per Day')
-            ax.set_xlabel('Date')
-            ax.set_ylabel('Count')
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
-            plt.savefig(img_buf, format='png')
-            plt.close(fig)
+    #     if days: 
+    #         fig, ax = plt.subplots(figsize=(6, 2.5))
+    #         ax.bar(days, counts)
+    #         ax.set_title('Symptom Logs per Day')
+    #         ax.set_xlabel('Date')
+    #         ax.set_ylabel('Count')
+    #         plt.xticks(rotation=45, ha='right')
+    #         plt.tight_layout()
+    #         plt.savefig(img_buf, format='png')
+    #         plt.close(fig)
 
     img_buf.seek(0) 
 
