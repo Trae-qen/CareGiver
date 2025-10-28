@@ -1,0 +1,7 @@
+[phases.setup]
+# Add the system packages (APT packages) needed by matplotlib
+aptPkgs = [
+    "libfreetype6-dev",
+    "libpng-dev",
+    "pkg-config"
+]
