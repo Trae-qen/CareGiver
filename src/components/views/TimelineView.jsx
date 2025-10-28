@@ -3,10 +3,16 @@ import AppIcon from '../common/AppIcon';
 import EmptyState from '../common/EmptyState';
 import { useCheckIn } from '../../context/CheckInContext';
 import { categoryIconColors, iconColors } from '../../utils/iconColors';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns-tz';
+import { parseISO } from 'date-fns';
 
 const TimelineView = () => {
     const { checkIns, adherences, isLoading, isAdherenceLoading } = useCheckIn();
+    
+    //Debug
+    console.log('Raw checkIns from context:', checkIns);
+
+    const targetTimeZone = 'America/Chicago';
 
     const timelineItems = useMemo(() => {
         const combined = [
@@ -15,13 +21,13 @@ const TimelineView = () => {
         ];
 
         const validItems = combined.filter(item => 
-            (item.type === 'check-in' && item.created_at) || 
+            (item.type === 'check-in' && item.timestamp) || 
             (item.type === 'adherence' && item.taken_time)
         );
 
         validItems.sort((a, b) => {
-            const timeA = parseISO(a.type === 'check-in' ? a.created_at : a.taken_time);
-            const timeB = parseISO(b.type === 'check-in' ? b.created_at : b.taken_time);
+            const timeA = parseISO(a.type === 'check-in' ? a.timestamp : a.taken_time);
+            const timeB = parseISO(b.type === 'check-in' ? b.timestamp : b.taken_time);
             return timeB - timeA;
         });
 
@@ -85,7 +91,8 @@ const TimelineView = () => {
     };
 
     const groupedByDate = timelineItems.reduce((acc, item) => {
-        const date = format(parseISO(item.type === 'check-in' ? item.created_at : item.taken_time), 'yyyy-MM-dd');
+        const itemTime = parseISO(item.type === 'check-in' ? item.timestamp : item.taken_time);
+        const date = format(itemTime, 'yyyy-MM-dd', { timeZone: targetTimeZone });
         if (!acc[date]) {
             acc[date] = [];
         }
@@ -105,7 +112,15 @@ const TimelineView = () => {
                     <div key={date}>
                         <div className="flex items-center mb-3">
                             <div className="flex-shrink-0 w-2 h-2 bg-gray-800 rounded-full mr-3"></div>
-                            <h2 className="text-sm font-bold text-gray-700 uppercase">{format(parseISO(date), 'MMMM d, yyyy')}</h2>
+                            
+                            {/* CHANGED: Format the date header */}
+                            {/* We parse the 'yyyy-MM-dd' string and format it. */}
+                            {/* We use timeZone: 'UTC' here to prevent 'parseISO' from shifting the date */}
+                            {/* to the previous day (e.g., '2025-10-27' becoming '2025-10-26'). */}
+                            <h2 className="text-sm font-bold text-gray-700 uppercase">
+                                {format(parseISO(date), 'MMMM d, yyyy', { timeZone: 'UTC' })}
+                            </h2>
+
                             <div className="flex-1 h-px bg-gray-200 ml-3"></div>
                         </div>
                         
@@ -113,10 +128,24 @@ const TimelineView = () => {
                             {items.map(item => {
                                 const category = item.type === 'adherence' ? 'Medications' : item.category;
                                 const colors = categoryIconColors[category] || iconColors.slate;
-                                const time = format(parseISO(item.type === 'check-in' ? item.created_at : item.taken_time), 'p');
+
+                                //DEBUG:
+                                const rawTimestamp = item.type === 'check-in' ? item.timestamp : item.taken_time;
+                                console.log('--- DEBUGGING TIMEZONE ---');
+                                console.log('Raw Timestamp:', rawTimestamp);
+                                console.log('Parsed Date Object:', parseISO(rawTimestamp));
+
+
+                                // CHANGED: Format the time using the target timezone
+                                const time = format(
+                                    parseISO(item.type === 'check-in' ? item.timestamp : item.taken_time), 
+                                    'p', // 'p' is the token for localized time, e.g., "10:57 AM"
+                                    { timeZone: targetTimeZone }
+                                );
                                 
                                 return (
-                                    <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm relative">
+                                    <div key={item.type === 'check-in' ? item.timestamp : item.taken_time} className="bg-white p-4 rounded-xl shadow-sm relative">
+                                        {/* ... (rest of the component is the same) ... */}
                                         <div className="absolute -left-[1.65rem] top-4 w-3 h-3 bg-white border-2 border-gray-300 rounded-full"></div>
                                         <div className="flex items-start">
                                             <div className={`w-10 h-10 flex items-center justify-center rounded-lg mr-3 flex-shrink-0 ${colors.bg}`}>
@@ -128,7 +157,6 @@ const TimelineView = () => {
                                                     <span className="text-xs text-gray-400">{time}</span>
                                                 </div>
                                                 <p className="text-sm font-medium text-gray-800 mb-1">{getDisplayText(item)}</p>
-                                                
                                                 {item.user && (
                                                     <div className="flex flex-col gap-1 mt-2 border-t border-gray-100 pt-2">
                                                         <p className="text-xs text-blue-600 flex items-center">
@@ -141,10 +169,10 @@ const TimelineView = () => {
                                                     </div>
                                                 )}
                                                 
-                                                {item.notes && (
+                                                {(item.data?.notes || item.notes) && (
                                                     <div className="mt-2">
                                                         <p className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                                                            <span className="font-medium">Notes:</span> {item.notes}
+                                                            <span className="font-medium">Notes:</span> {item.data?.notes || item.notes}
                                                         </p>
                                                     </div>
                                                 )}

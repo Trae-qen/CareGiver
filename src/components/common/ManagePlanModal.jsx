@@ -27,6 +27,7 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
         medication_id: '',
         time_of_day: '08:00',
         recurrence_rule: 'daily',
+        day_of_week: 'monday', // Add this
         notes: ''
     });
 
@@ -200,15 +201,31 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
 
     const handleAddSchedule = async () => {
         if (!newSchedule.medication_id || !newSchedule.time_of_day) return;
-        // Ensure user_id and patient_id are included
+        
+        // 1. Build the payload
         const scheduleWithIds = {
             ...newSchedule,
             user_id: user?.id,
             patient_id: selectedPatient?.id
         };
+
+        // 2. Clean up the payload: remove day_of_week if not weekly
+        if (scheduleWithIds.recurrence_rule !== 'weekly') {
+            delete scheduleWithIds.day_of_week;
+        }
+
         await medicationScheduleAPI.create(scheduleWithIds);
         setShowAddSchedule(false);
-        setNewSchedule({ medication_id: '', time_of_day: '08:00', recurrence_rule: 'daily', notes: '' });
+        
+        // 3. Reset the state (including the new day_of_week)
+        setNewSchedule({
+            medication_id: '',
+            time_of_day: '08:00',
+            recurrence_rule: 'daily',
+            day_of_week: 'monday', // Reset this
+            notes: ''
+        });
+
         setLoadingSchedules(true);
         medicationScheduleAPI.getAll().then(setSchedules).finally(() => setLoadingSchedules(false));
     };
@@ -232,7 +249,20 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
                             <div key={sch.id} className="flex items-center justify-between border-b py-2 last:border-b-0">
                                 <div>
                                     <div className="font-medium text-gray-800">{medications.find(m => m.id === sch.medication_id)?.name || 'Medication'} at {sch.time_of_day}</div>
-                                    <div className="text-xs text-gray-500">{sch.recurrence_rule} {sch.notes && `- ${sch.notes}`}</div>
+                                    <div className="text-xs text-gray-500">
+                                    {(() => {
+                                        // Helper to capitalize first letter
+                                        const capitalize = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+                                        
+                                        // Check if rule is weekly and day_of_week exists
+                                        if (sch.recurrence_rule === 'weekly' && sch.day_of_week) {
+                                            return `Weekly on ${capitalize(sch.day_of_week)}`;
+                                        }
+                                        // Fallback for 'daily', 'as_needed', or old data
+                                        return capitalize(sch.recurrence_rule);
+                                    })()}
+                                    {sch.notes && ` - ${sch.notes}`}
+                                </div>
                                 </div>
                                 <button onClick={() => handleDeleteSchedule(sch.id)} className="text-red-500 hover:underline text-xs">Delete</button>
                             </div>
@@ -291,6 +321,24 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
                                     <option value="as_needed">As Needed</option>
                                 </select>
                             </div>
+                            {newSchedule.recurrence_rule === 'weekly' && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Day of Week *</label>
+                                    <select
+                                        value={newSchedule.day_of_week}
+                                        onChange={e => setNewSchedule({ ...newSchedule, day_of_week: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                    >
+                                        <option value="monday">Monday</option>
+                                        <option value="tuesday">Tuesday</option>
+                                        <option value="wednesday">Wednesday</option>
+                                        <option value="thursday">Thursday</option>
+                                        <option value="friday">Friday</option>
+                                        <option value="saturday">Saturday</option>
+                                        <option value="sunday">Sunday</option>
+                                    </select>
+                                </div>
+                            )}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
                                 <input

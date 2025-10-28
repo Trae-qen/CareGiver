@@ -189,40 +189,49 @@ const AddItemModal = ({ isOpen, onClose, category, onSave }) => {
                 );
 
             case 'Tasks':
+                const taskOptions = [
+                    'Medication reminder',
+                    'Assisted with bathing',
+                    'Prepared meal',
+                    'Housekeeping',
+                    'Other'
+                ];
+
                 return (
                     <>
+                        {/* Dropdown for pre-defined tasks */}
                         <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Task Name</label>
-                            <input
-                                type="text"
+                            <label htmlFor="task" className="block text-sm font-medium text-gray-700 mb-2">Task</label>
+                            <select
+                                id="task"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                                placeholder="e.g., Dishes, Laundry, Grocery Shopping"
-                                value={formData.task || ''}
+                                value={formData.task || 'Medication reminder'} // Set a default
                                 onChange={(e) => setFormData({ ...formData, task: e.target.value })}
-                            />
+                            >
+                                {taskOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            </select>
                         </div>
+
+                        {/* Conditional text box for "Other" */}
+                        {formData.task === 'Other' && (
+                            <div className="mb-4">
+                                <label htmlFor="otherTask" className="block text-sm font-medium text-gray-700 mb-2">Please specify</label>
+                                <input
+                                    type="text"
+                                    id="otherTask"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                    value={formData.otherTask || ''}
+                                    onChange={(e) => setFormData({ ...formData, otherTask: e.target.value })}
+                                    placeholder="Describe the task"
+                                />
+                            </div>
+                        )}
+
+                        {/* Notes field */}
                         <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Completed By</label>
-                            <input
-                                type="text"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                                placeholder="Aide name"
-                                value={formData.completedBy || ''}
-                                onChange={(e) => setFormData({ ...formData, completedBy: e.target.value })}
-                            />
-                        </div>
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Time Completed</label>
-                            <input
-                                type="time"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                                value={formData.time || ''}
-                                onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                            />
-                        </div>
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+                            <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
                             <textarea
+                                id="notes"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
                                 rows="3"
                                 placeholder="Any additional details..."

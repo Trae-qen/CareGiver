@@ -5,6 +5,7 @@ import SymptomHistoryChart from './SymptomHistoryChart';
 import AppIcon from '../common/AppIcon';
 import { useCheckIn } from '../../context/CheckInContext';
 import { useCarePlan } from '../../context/CarePlanContext';
+import { format } from 'date-fns';
 // import { mockReminders } from '../../data/mockData';
 import { iconColors, categoryIconColors } from '../../utils/iconColors';
 
@@ -19,11 +20,34 @@ const TodayView = () => {
 
     const fetchSchedules = async () => {
         if (!selectedPatient) return;
-        const todayStr = new Date().toISOString().split('T')[0];
+
+        const today = new Date();
+        // 'YYYY-MM-DD' format (e.g., "2025-10-28")
+        const todayStr = today.toISOString().split('T')[0];
+        // 'eeee' gives the full day name (e.g., "Tuesday"), then we lower-case it
+        const todaysDayString = format(today, 'eeee').toLowerCase(); // e.g., "tuesday"
+
         setLoadingSchedules(true);
         try {
             const schedules = await medicationScheduleAPI.getAll({ patient_id: selectedPatient.id });
-            const filteredSchedules = schedules.filter(sch => sch.recurrence_rule === 'daily' || sch.recurrence_rule === 'as_needed' || (sch.next_run && sch.next_run.startsWith(todayStr)));
+
+            // --- THIS FILTER LOGIC IS NOW CORRECTED ---
+            const filteredSchedules = schedules.filter(sch => {
+                return (
+                    // It's a daily med
+                    sch.recurrence_rule === 'daily' ||
+                    
+                    // It's an "as needed" med
+                    sch.recurrence_rule === 'as_needed' ||
+                    
+                    // It's weekly AND the day matches today
+                    (sch.recurrence_rule === 'weekly' && sch.day_of_week === todaysDayString) ||
+                    
+                    // Keep your original logic for one-off runs
+                    (sch.next_run && sch.next_run.startsWith(todayStr)) 
+                );
+            });
+
             setTodaySchedules(filteredSchedules);
         } catch (error) {
             console.error('TodayView: Failed to fetch schedules:', error);
