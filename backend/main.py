@@ -11,10 +11,15 @@ import io
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
 import matplotlib.pyplot as plt
-from typing import Optional, List
+from typing import Optional, List, Any
 import os
 from dotenv import load_dotenv
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -339,14 +344,14 @@ def get_db():
         db.close()
 
 # PDF Report Generation Endpoint (moved here so 'app' is defined)
-@app.get("/api/reports/generate")
+@@app.get("/api/reports/generate")
 def generate_pdf_report(
     patient_id: int,
     from_date: str,
     to_date: str,
     db: Session = Depends(get_db)
 ):
-    # Query symptom logs and medication adherence for the patient and date range
+    # --- 1. DATA FETCHING (Same as before) ---
     from_dt = datetime.strptime(from_date, "%Y-%m-%d")
     to_dt = datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1)
     symptoms = db.query(SymptomLog).filter(
@@ -360,7 +365,7 @@ def generate_pdf_report(
         MedicationAdherence.scheduled_time < to_dt
     ).all()
 
-    # Generate a chart of symptom counts by day
+    # --- 2. MATPLOTLIB CHART (Same as before) ---
     symptom_counts = {}
     for log in symptoms:
         day = log.start_time.strftime('%Y-%m-%d')
@@ -381,47 +386,94 @@ def generate_pdf_report(
     plt.close(fig)
     img_buf.seek(0)
 
-    # Generate PDF
+    # --- 3. PDF GENERATION (Completely new logic) ---
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-    c = canvas.Canvas(tmp.name, pagesize=letter)
-    width, height = letter
-    c.setFont('Helvetica-Bold', 16)
-    c.drawString(40, height - 40, 'Patient Report')
-    c.setFont('Helvetica', 10)
-    c.drawString(40, height - 60, f'Patient ID: {patient_id}')
-    c.drawString(40, height - 75, f'Date Range: {from_date} to {to_date}')
-    c.drawString(40, height - 90, f'Generated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}')
+    
+    # Use SimpleDocTemplate for flowable layout
+    doc = SimpleDocTemplate(tmp.name, pagesize=letter,
+                            rightMargin=0.75*inch, leftMargin=0.75*inch,
+                            topMargin=0.75*inch, bottomMargin=0.75*inch)
+    
+    # "story" will hold all our ReportLab elements (flowables)
+    story = []
+    
+    # Get standard styles
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Title', fontSize=22, alignment=1, spaceAfter=14))
+    styles.add(ParagraphStyle(name='Header', fontSize=14, spaceAfter=12))
+    
+    # --- Title and Report Info ---
+    story.append(Paragraph("Patient Report", styles['Title']))
+    story.append(Paragraph(f"<b>Patient ID:</b> {patient_id}", styles['Normal']))
+    story.append(Paragraph(f"<b>Date Range:</b> {from_date} to {to_date}", styles['Normal']))
+    story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
+    story.append(Spacer(1, 0.25 * inch))
 
-    # Insert chart image
-    c.drawImage(ImageReader(img_buf), 40, height - 300, width=500, height=120)
+    # --- Add Chart ---
+    story.append(Paragraph("Symptom Log Frequency", styles['Header']))
+    story.append(Image(img_buf, width=7*inch, height=2.8*inch))
+    story.append(Spacer(1, 0.25 * inch))
+    
+    # --- Symptom Log Table ---
+    story.append(Paragraph("Symptom Logs", styles['Header']))
+    
+    symptom_data: list[list[Any]] = [["Date/Time", "Symptom", "Severity", "Notes"]]
+    for log in symptoms:
+        symptom_data.append([
+            log.start_time.strftime('%Y-%m-%d %H:%M'),
+            Paragraph(log.symptom_type, styles['Normal']),
+            str(log.severity or '-'),
+            Paragraph(log.notes or '', styles['Normal']) # Use Paragraph for wrapping
+        ])
 
-    # List symptom logs
-    c.setFont('Helvetica-Bold', 12)
-    c.drawString(40, height - 320, 'Symptom Logs:')
-    c.setFont('Helvetica', 9)
-    y = height - 335
-    for log in symptoms[:20]:
-        c.drawString(45, y, f"{log.start_time.strftime('%Y-%m-%d %H:%M')} - {log.symptom_type} (Severity: {log.severity or '-'}): {log.notes or ''}")
-        y -= 12
-        if y < 60:
-            c.showPage()
-            y = height - 40
+    symptom_table = Table(symptom_data, colWidths=[1.5*inch, 1.5*inch, 0.75*inch, 3.25*inch])
+    symptom_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4A90E2")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F8FF")),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#C2DFFF")),
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 1), (2, -1), 'CENTER'), # Align first 3 cols
+    ]))
+    story.append(symptom_table)
+    story.append(PageBreak()) # Start next section on a new page
 
-    # List medication adherence logs
-    c.setFont('Helvetica-Bold', 12)
-    c.drawString(40, y - 10, 'Medication Adherence:')
-    c.setFont('Helvetica', 9)
-    y -= 25
-    for log in adherence[:20]:
-        c.drawString(45, y, f"{log.scheduled_time.strftime('%Y-%m-%d %H:%M')} - {log.status.title()} - {log.notes or ''}")
-        y -= 12
-        if y < 60:
-            c.showPage()
-            y = height - 40
-
-    c.save()
+    # --- Medication Adherence Table ---
+    story.append(Paragraph("Medication Adherence", styles['Header']))
+    
+    adherence_data: list[list[Any]] = [["Scheduled Time", "Status", "Notes"]]
+    for log in adherence:
+        adherence_data.append([
+            log.scheduled_time.strftime('%Y-%m-%d %H:%M'),
+            log.status.title(),
+            Paragraph(log.notes or '', styles['Normal']) # Use Paragraph for wrapping
+        ])
+    
+    adherence_table = Table(adherence_data, colWidths=[1.5*inch, 1*inch, 4.5*inch])
+    adherence_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34A853")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F1FBF4")),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#BDE9C7")),
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 1), (1, -1), 'CENTER'), # Align first 2 cols
+    ]))
+    story.append(adherence_table)
+    
+    # --- Build the PDF ---
+    doc.build(story)
+    
     tmp.flush()
-
     return FileResponse(tmp.name, media_type='application/pdf', filename='patient_report.pdf')
 
 # Startup event to create database tables
