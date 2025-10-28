@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, func
 from sqlalchemy.ext.declarative import declarative_base
@@ -367,12 +367,10 @@ def generate_pdf_report(
         MedicationAdherence.scheduled_time < to_dt
     ).all()
 
-    # --- 2. MATPLOTLIB CHART (Now defensive) ---
-    
-    # <-- ADDED: Initialize buffer *outside* the 'if' block
+    # --- 2. MATPLOTLIB CHART (Same as before) ---
     img_buf = io.BytesIO() 
 
-    if symptoms: # <-- ADDED: Only run this block if we have symptoms
+    if symptoms: 
         symptom_counts = {}
         for log in symptoms:
             day = log.start_time.strftime('%Y-%m-%d')
@@ -381,7 +379,6 @@ def generate_pdf_report(
         days = sorted(symptom_counts.keys())
         counts = [symptom_counts[day] for day in days]
 
-        # <-- ADDED: Double-check 'days' is not empty before plotting
         if days: 
             fig, ax = plt.subplots(figsize=(6, 2.5))
             ax.bar(days, counts)
@@ -390,51 +387,47 @@ def generate_pdf_report(
             ax.set_ylabel('Count')
             plt.xticks(rotation=45, ha='right')
             plt.tight_layout()
-            plt.savefig(img_buf, format='png') # <-- MOVED from original
-            plt.close(fig) # <-- MOVED from original
+            plt.savefig(img_buf, format='png')
+            plt.close(fig)
 
-    # <-- MOVED: Seek buffer *after* 'if' block, so it always runs
     img_buf.seek(0) 
 
-    # --- 3. PDF GENERATION (Completely new logic) ---
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    # --- 3. PDF GENERATION (Modified for in-memory) ---
+
+    pdf_buf = io.BytesIO()
     
-    # Use SimpleDocTemplate for flowable layout
-    doc = SimpleDocTemplate(tmp.name, pagesize=letter,
+    doc = SimpleDocTemplate(pdf_buf, pagesize=letter,
                             rightMargin=0.75*inch, leftMargin=0.75*inch,
                             topMargin=0.75*inch, bottomMargin=0.75*inch)
     
-    # "story" will hold all our ReportLab elements (flowables)
     story = []
     
-    # Get standard styles
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='Title', fontSize=22, alignment=1, spaceAfter=14))
     styles.add(ParagraphStyle(name='Header', fontSize=14, spaceAfter=12))
     
-    # --- Title and Report Info ---
+    # --- Title and Report Info (Same as before) ---
     story.append(Paragraph("Patient Report", styles['Title']))
     story.append(Paragraph(f"<b>Patient ID:</b> {patient_id}", styles['Normal']))
     story.append(Paragraph(f"<b>Date Range:</b> {from_date} to {to_date}", styles['Normal']))
     story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
     story.append(Spacer(1, 0.25 * inch))
 
-    # --- Add Chart ---
+    # --- Add Chart (Same as before) ---
     story.append(Paragraph("Symptom Log Frequency", styles['Header']))
     
-    if symptoms: # <-- ADDED: Only add the image if symptoms existed
+    if symptoms: 
         story.append(Image(img_buf, width=7*inch, height=2.8*inch))
-    else: # <-- ADDED: Otherwise, add a note
+    else: 
         story.append(Paragraph("<i>No symptom data to display in chart.</i>", styles['Normal']))
         
     story.append(Spacer(1, 0.25 * inch))
     
-    # --- Symptom Log Table ---
+    # --- Symptom Log Table (Same as before) ---
     story.append(Paragraph("Symptom Logs", styles['Header']))
     
     symptom_data: list[list[Any]] = [["Date/Time", "Symptom", "Severity", "Notes"]]
     
-    # <-- ADDED: Handle case with no symptoms for the table
     if not symptoms:
         symptom_data.append(["-", "No symptom logs for this period", "-", "-"])
     
@@ -443,7 +436,7 @@ def generate_pdf_report(
             log.start_time.strftime('%Y-%m-%d %H:%M'),
             Paragraph(log.symptom_type, styles['Normal']),
             str(log.severity or '-'),
-            Paragraph(log.notes or '', styles['Normal']) # Use Paragraph for wrapping
+            Paragraph(log.notes or '', styles['Normal']) 
         ])
 
     symptom_table = Table(symptom_data, colWidths=[1.5*inch, 1.5*inch, 0.75*inch, 3.25*inch])
@@ -458,17 +451,16 @@ def generate_pdf_report(
         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#C2DFFF")),
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 1), (2, -1), 'CENTER'), # Align first 3 cols
+        ('ALIGN', (0, 1), (2, -1), 'CENTER'),
     ]))
     story.append(symptom_table)
-    story.append(PageBreak()) # Start next section on a new page
+    story.append(PageBreak()) 
 
-    # --- Medication Adherence Table ---
+    # --- Medication Adherence Table (Same as before) ---
     story.append(Paragraph("Medication Adherence", styles['Header']))
     
     adherence_data: list[list[Any]] = [["Scheduled Time", "Status", "Notes"]]
     
-    # <-- ADDED: Handle case with no adherence data for the table
     if not adherence:
         adherence_data.append(["-", "No adherence logs for this period", "-"])
         
@@ -476,7 +468,7 @@ def generate_pdf_report(
         adherence_data.append([
             log.scheduled_time.strftime('%Y-%m-%d %H:%M'),
             log.status.title(),
-            Paragraph(log.notes or '', styles['Normal']) # Use Paragraph for wrapping
+            Paragraph(log.notes or '', styles['Normal'])
         ])
     
     adherence_table = Table(adherence_data, colWidths=[1.5*inch, 1*inch, 4.5*inch])
@@ -491,15 +483,23 @@ def generate_pdf_report(
         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#BDE9C7")),
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 1), (1, -1), 'CENTER'), # Align first 2 cols
+        ('ALIGN', (0, 1), (1, -1), 'CENTER'),
     ]))
     story.append(adherence_table)
     
     # --- Build the PDF ---
     doc.build(story)
     
-    tmp.flush()
-    return FileResponse(tmp.name, media_type='application/pdf', filename='patient_report.pdf')
+    pdf_buf.seek(0)
+    
+    return StreamingResponse(
+        pdf_buf, 
+        media_type='application/pdf', 
+        headers={
+            'Content-Disposition': 'attachment; filename="patient_report.pdf"'
+        }
+    )
+    
 # Startup event to create database tables
 @app.on_event("startup")
 async def startup_event():
