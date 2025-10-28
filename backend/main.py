@@ -17,6 +17,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from typing import Optional, List, Any
 import os
 from dotenv import load_dotenv
@@ -366,26 +367,34 @@ def generate_pdf_report(
         MedicationAdherence.scheduled_time < to_dt
     ).all()
 
-    # --- 2. MATPLOTLIB CHART (Same as before) ---
-    symptom_counts = {}
-    for log in symptoms:
-        day = log.start_time.strftime('%Y-%m-%d')
-        symptom_counts.setdefault(day, 0)
-        symptom_counts[day] += 1
-    days = sorted(symptom_counts.keys())
-    counts = [symptom_counts[day] for day in days]
+    # --- 2. MATPLOTLIB CHART (Now defensive) ---
+    
+    # <-- ADDED: Initialize buffer *outside* the 'if' block
+    img_buf = io.BytesIO() 
 
-    fig, ax = plt.subplots(figsize=(6, 2.5))
-    ax.bar(days, counts)
-    ax.set_title('Symptom Logs per Day')
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Count')
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-    img_buf = io.BytesIO()
-    plt.savefig(img_buf, format='png')
-    plt.close(fig)
-    img_buf.seek(0)
+    if symptoms: # <-- ADDED: Only run this block if we have symptoms
+        symptom_counts = {}
+        for log in symptoms:
+            day = log.start_time.strftime('%Y-%m-%d')
+            symptom_counts.setdefault(day, 0)
+            symptom_counts[day] += 1
+        days = sorted(symptom_counts.keys())
+        counts = [symptom_counts[day] for day in days]
+
+        # <-- ADDED: Double-check 'days' is not empty before plotting
+        if days: 
+            fig, ax = plt.subplots(figsize=(6, 2.5))
+            ax.bar(days, counts)
+            ax.set_title('Symptom Logs per Day')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Count')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            plt.savefig(img_buf, format='png') # <-- MOVED from original
+            plt.close(fig) # <-- MOVED from original
+
+    # <-- MOVED: Seek buffer *after* 'if' block, so it always runs
+    img_buf.seek(0) 
 
     # --- 3. PDF GENERATION (Completely new logic) ---
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
@@ -412,13 +421,23 @@ def generate_pdf_report(
 
     # --- Add Chart ---
     story.append(Paragraph("Symptom Log Frequency", styles['Header']))
-    story.append(Image(img_buf, width=7*inch, height=2.8*inch))
+    
+    if symptoms: # <-- ADDED: Only add the image if symptoms existed
+        story.append(Image(img_buf, width=7*inch, height=2.8*inch))
+    else: # <-- ADDED: Otherwise, add a note
+        story.append(Paragraph("<i>No symptom data to display in chart.</i>", styles['Normal']))
+        
     story.append(Spacer(1, 0.25 * inch))
     
     # --- Symptom Log Table ---
     story.append(Paragraph("Symptom Logs", styles['Header']))
     
     symptom_data: list[list[Any]] = [["Date/Time", "Symptom", "Severity", "Notes"]]
+    
+    # <-- ADDED: Handle case with no symptoms for the table
+    if not symptoms:
+        symptom_data.append(["-", "No symptom logs for this period", "-", "-"])
+    
     for log in symptoms:
         symptom_data.append([
             log.start_time.strftime('%Y-%m-%d %H:%M'),
@@ -448,6 +467,11 @@ def generate_pdf_report(
     story.append(Paragraph("Medication Adherence", styles['Header']))
     
     adherence_data: list[list[Any]] = [["Scheduled Time", "Status", "Notes"]]
+    
+    # <-- ADDED: Handle case with no adherence data for the table
+    if not adherence:
+        adherence_data.append(["-", "No adherence logs for this period", "-"])
+        
     for log in adherence:
         adherence_data.append([
             log.scheduled_time.strftime('%Y-%m-%d %H:%M'),
@@ -476,7 +500,6 @@ def generate_pdf_report(
     
     tmp.flush()
     return FileResponse(tmp.name, media_type='application/pdf', filename='patient_report.pdf')
-
 # Startup event to create database tables
 @app.on_event("startup")
 async def startup_event():
