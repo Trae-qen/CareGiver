@@ -344,7 +344,7 @@ def get_db():
         db.close()
 
 # PDF Report Generation Endpoint (moved here so 'app' is defined)
-@@app.get("/api/reports/generate")
+@app.get("/api/reports/generate")
 def generate_pdf_report(
     patient_id: int,
     from_date: str,
