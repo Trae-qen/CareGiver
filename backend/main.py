@@ -99,6 +99,7 @@ class MedicationSchedule(Base):
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)
     time_of_day = Column(String, nullable=False)  # e.g. '08:00'
     recurrence_rule = Column(String, nullable=True)  # e.g. 'daily', 'weekly', 'custom'
+    day_of_week = Column(String(10), nullable=True)
     timezone = Column(String, nullable=True)
     next_run = Column(DateTime, nullable=True)
     active = Column(Boolean, default=True)
@@ -261,6 +262,7 @@ class MedicationScheduleCreate(BaseModel):
     patient_id: Optional[int] = None
     time_of_day: str
     recurrence_rule: Optional[str] = None
+    day_of_week: Optional[str] = None
     timezone: Optional[str] = None
     next_run: Optional[datetime] = None
     active: Optional[bool] = True
@@ -273,6 +275,7 @@ class MedicationScheduleResponse(BaseModel):
     patient_id: Optional[int]
     time_of_day: str
     recurrence_rule: Optional[str]
+    day_of_week: Optional[str]
     timezone: Optional[str]
     next_run: Optional[datetime]
     active: bool
@@ -785,7 +788,12 @@ def delete_medication(medication_id: int, db: Session = Depends(get_db)):
 # MedicationSchedule endpoints
 @app.post("/api/medication-schedules", response_model=MedicationScheduleResponse)
 def create_medication_schedule(schedule: MedicationScheduleCreate, db: Session = Depends(get_db)):
-    db_schedule = MedicationSchedule(**schedule.dict())
+    schedule_data = schedule.dict()
+    # If the rule isn't weekly, force day_of_week to be null
+    if schedule_data.get("recurrence_rule") != "weekly":
+        schedule_data["day_of_week"] = None
+    
+    db_schedule = MedicationSchedule(**schedule_data)
     db.add(db_schedule)
     db.commit()
     db.refresh(db_schedule)
@@ -814,6 +822,8 @@ def update_medication_schedule(schedule_id: int, updates: MedicationScheduleCrea
         raise HTTPException(status_code=404, detail="Schedule not found")
     for key, value in updates.dict(exclude_unset=True).items():
         setattr(schedule, key, value)
+    if schedule.recurrence_rule != "weekly":
+        schedule.day_of_week = None
     db.commit()
     db.refresh(schedule)
     return schedule
