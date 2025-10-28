@@ -403,10 +403,7 @@ def generate_pdf_report(
                     logging.info("No day data to plot, skipping chart.")
             
             except Exception as e:
-                # Log the error, but don't crash the entire report
                 logging.error(f"Matplotlib chart generation FAILED: {e}", exc_info=True)
-                # This often happens on servers without system font/graphics libraries.
-                # See my previous message about 'nixpacks.toml' to fix this.
 
         img_buf.seek(0) 
 
@@ -418,9 +415,18 @@ def generate_pdf_report(
                                 topMargin=0.75*inch, bottomMargin=0.75*inch)
         
         story = []
+        
+        # --- THIS IS THE FIXED BLOCK ---
         styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle(name='Title', fontSize=22, alignment=1, spaceAfter=14))
+        
+        # Modify the existing 'Title' style
+        styles['Title'].fontSize = 22
+        styles['Title'].alignment = 1  # 1 = TA_CENTER
+        styles['Title'].spaceAfter = 14
+
+        # Add the new custom 'Header' style
         styles.add(ParagraphStyle(name='Header', fontSize=14, spaceAfter=12))
+        # --- END OF FIX ---
 
         # --- Title and Report Info ---
         story.append(Paragraph("Patient Report", styles['Title']))
@@ -464,7 +470,7 @@ def generate_pdf_report(
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F8FF")),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F3F8")), # Lightened color slightly
             ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#C2DFFF")),
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -519,9 +525,6 @@ def generate_pdf_report(
         )
 
     except Exception as e:
-        # ---!! THIS IS THE MOST IMPORTANT PART !! ---
-        # If ANYTHING fails, log the full error and return a proper 500
-        # This allows the frontend to get a JSON response and avoids the CORS error
         logging.error(f"CRITICAL: Report generation failed with uncaught exception: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, 
