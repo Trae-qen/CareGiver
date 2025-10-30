@@ -1022,6 +1022,44 @@ def update_patient_info(patient_info: PatientInfoUpdate, db: Session = Depends(g
     db.refresh(patient)
     return patient
 
+# Push Notification endpoints
+@app.post("/api/push/subscribe", response_model=PushSubscriptionResponse)
+def subscribe_to_push(sub_data: PushSubscriptionCreate, db: Session = Depends(get_db)):
+    """
+    Subscribes a user to push notifications.
+    Stores the unique subscription token from the browser.
+    """
+    # Check if this exact subscription (based on the unique endpoint URL) already exists
+    # This prevents duplicate subscriptions for the same user/browser
+    endpoint = sub_data.subscription_data.get("endpoint")
+    if not endpoint:
+        raise HTTPException(status_code=400, detail="Subscription data must include an 'endpoint'.")
+    
+    existing_sub = db.query(PushSubscription).filter(
+        # This is how you query a value inside a JSON field
+        PushSubscription.subscription_data["endpoint"].astext == endpoint
+    ).first()
+    
+    if existing_sub:
+        # It already exists, just return it
+        return existing_sub
+    
+    # Check if the user exists
+    user = db.query(User).filter(User.id == sub_data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with id {sub_data.user_id} not found.")
+
+    # Create new subscription
+    db_subscription = PushSubscription(
+        user_id=sub_data.user_id,
+        subscription_data=sub_data.subscription_data
+    )
+    db.add(db_subscription)
+    db.commit()
+    db.refresh(db_subscription)
+    
+    return db_subscription
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
