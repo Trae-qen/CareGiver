@@ -162,7 +162,7 @@ class PushSubscription(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     # Store the entire subscription object as JSON
-    subscription_data = Column(JSON, nullable=False, unique=True) 
+    subscription_data = Column(JSON, nullable=False) 
     created_at = Column(DateTime(timezone=True), default=now_utc)
     
     # Added back_populates to link back to User
