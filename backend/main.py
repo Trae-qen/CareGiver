@@ -25,6 +25,8 @@ from dotenv import load_dotenv
 import logging
 from pywebpush import webpush, WebPushException
 import json
+from apscheduler.schedulers.background import BackgroundScheduler
+from contextlib import contextmanager
 
 
 # Setup logging
@@ -582,15 +584,40 @@ def generate_pdf_report(
             detail=f"An internal error occurred during PDF generation." # Don't leak exception details
         )
     
+    
+scheduler = BackgroundScheduler(timezone="UTC")
 # Startup event to create database tables
 @app.on_event("startup")
 async def startup_event():
-    """Create database tables on startup"""
+    """Create database tables and start the scheduler"""
     try:
         Base.metadata.create_all(bind=engine)
         print("✅ Database tables created successfully")
     except Exception as e:
         print(f"❌ Error creating database tables: {e}")
+
+    # --- ADD THIS LOGIC ---
+    try:
+        # Add the job to run every minute
+        scheduler.add_job(
+            check_and_send_medication_reminders,
+            'cron',
+            minute='*'  # This means "run every minute"
+        )
+        scheduler.start()
+        print("✅ Background scheduler started successfully.")
+    except Exception as e:
+        print(f"❌ Error starting scheduler: {e}")
+        
+        
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop the scheduler"""
+    try:
+        scheduler.shutdown()
+        print("✅ Background scheduler shut down successfully.")
+    except Exception as e:
+        print(f"❌ Error shutting down scheduler: {e}")
 
 # CORS middleware
 app.add_middleware(
@@ -1099,64 +1126,133 @@ def send_notification(
     """
     Sends a push notification to all active subscriptions for a given user.
     """
-    # 1. Get VAPID keys from environment
+    success, fail = _send_notification_to_user(
+        user_id=user_id,
+        title=payload.title,
+        body=payload.body,
+        db=db
+    )
+    
+    if success == 0 and fail == 0 and db.query(PushSubscription).filter(PushSubscription.user_id == user_id).count() == 0:
+         return {"message": "No push subscriptions found for this user."}
+
+    return {
+        "message": "Push notifications sent.",
+        "successful": success,
+        "failed": fail
+    }
+    
+    
+@contextmanager
+def get_db_session():
+    """Provides a standalone database session for background tasks."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def _send_notification_to_user(user_id: int, title: str, body: str, db: Session):
+    """
+    Helper function to send a notification to all of a user's subscriptions.
+    """
     vapid_private_key = os.getenv("VAPID_PRIVATE_KEY")
     vapid_claim_email = os.getenv("VAPID_CLAIM_EMAIL")
-
+    
     if not vapid_private_key or not vapid_claim_email:
-        log.error("VAPID keys are not configured on the server.")
-        raise HTTPException(
-            status_code=500, 
-            detail="Push notifications are not configured."
-        )
+        log.error(f"VAPID keys not set. Cannot send notification to user {user_id}")
+        return 0, 0 # success, fail
 
-    # 2. Find all subscriptions for this user
     subscriptions = db.query(PushSubscription).filter(
         PushSubscription.user_id == user_id
     ).all()
 
     if not subscriptions:
         log.warning(f"No push subscriptions found for user {user_id}")
-        return {"message": "No push subscriptions found for this user."}
+        return 0, 0
 
     log.info(f"Sending notification to {len(subscriptions)} subscription(s) for user {user_id}")
     
-    # 3. Loop and send to each one
     success_count = 0
     failure_count = 0
+    payload = json.dumps({"title": title, "body": body})
     
     for sub in subscriptions:
         try:
-            # The subscription_data is what you stored from the browser
-            # The payload is the JSON string of your title and body
             webpush(
                 subscription_info=sub.subscription_data,
-                data=payload.model_dump_json(),
+                data=payload,
                 vapid_private_key=vapid_private_key,
                 vapid_claims={"sub": vapid_claim_email}
             )
             success_count += 1
-        
         except WebPushException as ex:
-            # This happens if a subscription is expired or invalid
-            # We can delete the subscription from the DB here
             log.warning(f"Failed to send push: {ex}")
             if ex.response and ex.response.status_code == 410:
                 log.info(f"Subscription {sub.id} is expired. Deleting.")
-                db.delete(sub) # Auto-cleanup
+                db.delete(sub)
             failure_count += 1
-        
         except Exception as e:
             log.error(f"An unknown error occurred sending push: {e}")
             failure_count += 1
+            
+    db.commit() # Save any deletions
+    return success_count, failure_count
 
-    db.commit() # To save any deletions
 
-    return {
-        "message": "Push notifications sent.",
-        "successful": success_count,
-        "failed": failure_count
-    }
+def check_and_send_medication_reminders():
+    """
+    This job runs every minute, checks the DB for due medications,
+    and sends push notifications.
+    """
+    log.info("SCHEDULER: Running medication reminder check...")
+    
+    # We must create a new session because this runs in a background thread
+    with get_db_session() as db:
+        try:
+            now_utc = datetime.now(timezone.utc)
+            # Format: 'HH:MM' (e.g., '08:30')
+            current_time_str = now_utc.strftime('%H:%M') 
+            # Format: 'monday', 'tuesday', etc.
+            current_day_str = now_utc.strftime('%A').lower() 
+
+            # Find all active schedules due at this exact minute
+            schedules_due_now = db.query(MedicationSchedule).options(
+                joinedload(MedicationSchedule.medication) # Load the medication info
+            ).filter(
+                MedicationSchedule.active == True,
+                MedicationSchedule.time_of_day == current_time_str,
+                MedicationSchedule.user_id.isnot(None) # Must have a user to notify
+            ).all()
+
+            if not schedules_due_now:
+                log.info("SCHEDULER: No medications due this minute.")
+                return
+
+            log.info(f"SCHEDULER: Found {len(schedules_due_now)} schedules due.")
+
+            for schedule in schedules_due_now:
+                # Check recurrence rules (this matches your frontend logic)
+                is_due_today = (
+                    schedule.recurrence_rule == 'daily' or
+                    (schedule.recurrence_rule == 'weekly' and schedule.day_of_week == current_day_str)
+                )
+
+                if is_due_today and schedule.medication:
+                    log.info(f"SCHEDULER: Sending reminder for '{schedule.medication.name}' to user {schedule.user_id}")
+                    
+                    title = "Medication Reminder"
+                    body = f"It's time to take {schedule.medication.name} ({schedule.medication.dosage})."
+                    
+                    _send_notification_to_user(
+                        user_id=schedule.user_id,
+                        title=title,
+                        body=body,
+                        db=db
+                    )
+        except Exception as e:
+            log.error(f"SCHEDULER: Error during reminder check: {e}", exc_info=True)
+            db.rollback()
 
 if __name__ == "__main__":
     import uvicorn
