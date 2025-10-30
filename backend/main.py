@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship, joinedload
 from pydantic import BaseModel, EmailStr
@@ -22,6 +23,8 @@ from typing import Optional, List, Any
 import os
 from dotenv import load_dotenv
 import logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 
 # Load environment variables from .env file
@@ -162,7 +165,7 @@ class PushSubscription(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     # Store the entire subscription object as JSON
-    subscription_data = Column(JSON, nullable=False) 
+    subscription_data = Column(JSONB, nullable=False) 
     created_at = Column(DateTime(timezone=True), default=now_utc)
     
     # Added back_populates to link back to User
@@ -1029,36 +1032,53 @@ def subscribe_to_push(sub_data: PushSubscriptionCreate, db: Session = Depends(ge
     Subscribes a user to push notifications.
     Stores the unique subscription token from the browser.
     """
-    # Check if this exact subscription (based on the unique endpoint URL) already exists
-    # This prevents duplicate subscriptions for the same user/browser
-    endpoint = sub_data.subscription_data.get("endpoint")
-    if not endpoint:
-        raise HTTPException(status_code=400, detail="Subscription data must include an 'endpoint'.")
-    
-    existing_sub = db.query(PushSubscription).filter(
-        # This is how you query a value inside a JSON field
-        PushSubscription.subscription_data["endpoint"].astext == endpoint
-    ).first()
-    
-    if existing_sub:
-        # It already exists, just return it
-        return existing_sub
-    
-    # Check if the user exists
-    user = db.query(User).filter(User.id == sub_data.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail=f"User with id {sub_data.user_id} not found.")
+    log.info(f"Attempting to subscribe user {sub_data.user_id}")
+    try:
+        # Check if the user exists FIRST. This is a fast, simple query.
+        user = db.query(User).filter(User.id == sub_data.user_id).first()
+        if not user:
+            log.warning(f"Subscription failed: User with id {sub_data.user_id} not found.")
+            raise HTTPException(status_code=404, detail=f"User with id {sub_data.user_id} not found.")
+        
+        # Now validate the subscription data
+        endpoint = sub_data.subscription_data.get("endpoint")
+        if not endpoint:
+            log.warning("Subscription failed: Subscription data missing 'endpoint'.")
+            raise HTTPException(status_code=400, detail="Subscription data must include an 'endpoint'.")
+        
+        # Check if this exact subscription (based on the unique endpoint URL) already exists
+        log.info(f"Checking for existing subscription with endpoint: {endpoint[:30]}...")
+        existing_sub = db.query(PushSubscription).filter(
+            PushSubscription.subscription_data["endpoint"].astext == endpoint
+        ).first()
+        
+        if existing_sub:
+            log.info(f"Subscription for endpoint {endpoint[:30]}... already exists.")
+            return existing_sub
+        
+        # Create new subscription
+        log.info("Creating new push subscription...")
+        db_subscription = PushSubscription(
+            user_id=sub_data.user_id,
+            subscription_data=sub_data.subscription_data
+        )
+        db.add(db_subscription)
+        db.commit()
+        db.refresh(db_subscription)
+        
+        log.info(f"Successfully created subscription {db_subscription.id} for user {sub_data.user_id}")
+        return db_subscription
 
-    # Create new subscription
-    db_subscription = PushSubscription(
-        user_id=sub_data.user_id,
-        subscription_data=sub_data.subscription_data
-    )
-    db.add(db_subscription)
-    db.commit()
-    db.refresh(db_subscription)
-    
-    return db_subscription
+    except Exception as e:
+        # This will catch the crash and log it
+        log.error(f"CRITICAL: /api/push/subscribe endpoint failed: {e}", exc_info=True)
+        # Rollback any partial database transaction
+        db.rollback() 
+        # Return a proper 500 error as JSON instead of crashing
+        raise HTTPException(
+            status_code=500, 
+            detail=f"An internal server error occurred while processing the subscription."
+        )
 
 if __name__ == "__main__":
     import uvicorn
