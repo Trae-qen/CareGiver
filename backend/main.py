@@ -23,6 +23,11 @@ from typing import Optional, List, Any
 import os
 from dotenv import load_dotenv
 import logging
+from pywebpush import webpush, WebPushException
+import json
+
+
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
@@ -171,6 +176,8 @@ class PushSubscription(Base):
     # Added back_populates to link back to User
     user = relationship("User", back_populates="push_subscriptions") 
 # --- END NEW MODEL ---
+
+
 
 
 # Deprecated - keeping for backward compatibility
@@ -337,7 +344,7 @@ class MedicationAdherenceResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# --- ADDED NEW PYDANTIC MODELS ---
+# PushSubscription Pydantic models
 class PushSubscriptionCreate(BaseModel):
     user_id: int
     subscription_data: dict # Expects the JSON from the frontend
@@ -349,7 +356,10 @@ class PushSubscriptionResponse(BaseModel):
 
     class Config:
         from_attributes = True
-# --- END NEW PYDANTIC MODELS ---
+
+class NotificationPayload(BaseModel):
+    title: str
+    body: str
 
 
 class PatientInfoUpdate(BaseModel):
@@ -1079,6 +1089,74 @@ def subscribe_to_push(sub_data: PushSubscriptionCreate, db: Session = Depends(ge
             status_code=500, 
             detail=f"An internal server error occurred while processing the subscription."
         )
+        
+@app.post("/api/push/notify/{user_id}")
+def send_notification(
+    user_id: int, 
+    payload: NotificationPayload, 
+    db: Session = Depends(get_db)
+):
+    """
+    Sends a push notification to all active subscriptions for a given user.
+    """
+    # 1. Get VAPID keys from environment
+    vapid_private_key = os.getenv("VAPID_PRIVATE_KEY")
+    vapid_claim_email = os.getenv("VAPID_CLAIM_EMAIL")
+
+    if not vapid_private_key or not vapid_claim_email:
+        log.error("VAPID keys are not configured on the server.")
+        raise HTTPException(
+            status_code=500, 
+            detail="Push notifications are not configured."
+        )
+
+    # 2. Find all subscriptions for this user
+    subscriptions = db.query(PushSubscription).filter(
+        PushSubscription.user_id == user_id
+    ).all()
+
+    if not subscriptions:
+        log.warning(f"No push subscriptions found for user {user_id}")
+        return {"message": "No push subscriptions found for this user."}
+
+    log.info(f"Sending notification to {len(subscriptions)} subscription(s) for user {user_id}")
+    
+    # 3. Loop and send to each one
+    success_count = 0
+    failure_count = 0
+    
+    for sub in subscriptions:
+        try:
+            # The subscription_data is what you stored from the browser
+            # The payload is the JSON string of your title and body
+            webpush(
+                subscription_info=sub.subscription_data,
+                data=payload.model_dump_json(),
+                vapid_private_key=vapid_private_key,
+                vapid_claims={"sub": vapid_claim_email}
+            )
+            success_count += 1
+        
+        except WebPushException as ex:
+            # This happens if a subscription is expired or invalid
+            # We can delete the subscription from the DB here
+            log.warning(f"Failed to send push: {ex}")
+            if ex.response and ex.response.status_code == 410:
+                log.info(f"Subscription {sub.id} is expired. Deleting.")
+                db.delete(sub) # Auto-cleanup
+            failure_count += 1
+        
+        except Exception as e:
+            log.error(f"An unknown error occurred sending push: {e}")
+            failure_count += 1
+
+    db.commit() # To save any deletions
+
+    return {
+        "message": "Push notifications sent.",
+        "successful": success_count,
+        "failed": failure_count
+    }
 
 if __name__ == "__main__":
     import uvicorn
