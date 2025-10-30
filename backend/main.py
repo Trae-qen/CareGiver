@@ -3,13 +3,13 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, func
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
+from sqlalchemy.orm import sessionmaker, Session, relationship, joinedload
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta, timezone
 import tempfile
 import io
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+# Removed unused canvas import
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -68,6 +68,8 @@ class User(Base):
     last_login = Column(DateTime(timezone=True))
     
     checkins = relationship("CheckIn", back_populates="user")
+    # Added relationship for push subscriptions
+    push_subscriptions = relationship("PushSubscription", back_populates="user")
 
 class CheckIn(Base):
     __tablename__ = "checkins"
@@ -152,6 +154,21 @@ class SymptomLog(Base):
 
     user = relationship("User")
     patient = relationship("Patient")
+
+# --- ADDED NEW DATABASE MODEL ---
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # Store the entire subscription object as JSON
+    subscription_data = Column(JSON, nullable=False, unique=True) 
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    
+    # Added back_populates to link back to User
+    user = relationship("User", back_populates="push_subscriptions") 
+# --- END NEW MODEL ---
+
 
 # Deprecated - keeping for backward compatibility
 class PatientInfo(Base):
@@ -317,6 +334,21 @@ class MedicationAdherenceResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# --- ADDED NEW PYDANTIC MODELS ---
+class PushSubscriptionCreate(BaseModel):
+    user_id: int
+    subscription_data: dict # Expects the JSON from the frontend
+
+class PushSubscriptionResponse(BaseModel):
+    id: int
+    user_id: int
+    subscription_data: dict
+
+    class Config:
+        from_attributes = True
+# --- END NEW PYDANTIC MODELS ---
+
+
 class PatientInfoUpdate(BaseModel):
     name: Optional[str]
     age: Optional[int]
@@ -338,7 +370,7 @@ class PatientInfoResponse(BaseModel):
 # FastAPI app
 app = FastAPI(title="CareGiver API", version="1.0.0")
 
-# Dependency (moved up so it's available for PDF endpoint)
+# Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -346,7 +378,7 @@ def get_db():
     finally:
         db.close()
 
-# PDF Report Generation Endpoint (moved here so 'app' is defined)
+# PDF Report Generation Endpoint
 @app.get("/api/reports/generate")
 def generate_pdf_report(
     patient_id: int,
@@ -366,7 +398,9 @@ def generate_pdf_report(
             SymptomLog.start_time < to_dt
         ).order_by(SymptomLog.start_time.asc()).all()
         
-        adherence = db.query(MedicationAdherence).filter(
+        adherence = db.query(MedicationAdherence).options(
+            joinedload(MedicationAdherence.medication)
+        ).filter(
             MedicationAdherence.patient_id == patient_id,
             MedicationAdherence.scheduled_time >= from_dt,
             MedicationAdherence.scheduled_time < to_dt
@@ -416,17 +450,12 @@ def generate_pdf_report(
         
         story = []
         
-        # --- THIS IS THE FIXED BLOCK ---
         styles = getSampleStyleSheet()
         
-        # Modify the existing 'Title' style
         styles['Title'].fontSize = 22
-        styles['Title'].alignment = 1  # 1 = TA_CENTER
+        styles['Title'].alignment = 1 
         styles['Title'].spaceAfter = 14
-
-        # Add the new custom 'Header' style
         styles.add(ParagraphStyle(name='Header', fontSize=14, spaceAfter=12))
-        # --- END OF FIX ---
 
         # --- Title and Report Info ---
         story.append(Paragraph("Patient Report", styles['Title']))
@@ -435,7 +464,7 @@ def generate_pdf_report(
         story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
         story.append(Spacer(1, 0.25 * inch))
 
-        # --- Add Chart (Only if it was successful) ---
+        # --- Add Chart ---
         story.append(Paragraph("Symptom Log Frequency", styles['Header']))
         
         if chart_generated_successfully:
@@ -470,7 +499,7 @@ def generate_pdf_report(
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F3F8")), # Lightened color slightly
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F3F8")), 
             ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#C2DFFF")),
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -481,19 +510,23 @@ def generate_pdf_report(
 
         # --- Medication Adherence Table ---
         story.append(Paragraph("Medication Adherence", styles['Header']))
-        adherence_data: list[list[Any]] = [["Scheduled Time", "Status", "Notes"]]
+        
+        adherence_data: list[list[Any]] = [["Scheduled Time", "Medication", "Status", "Notes"]]
         
         if not adherence:
-            adherence_data.append(["-", "No adherence logs for this period", "-"])
+            adherence_data.append(["-", "No adherence logs for this period", "-", "-"])
         else:
             for log in adherence:
+                med_name = log.medication.name if log.medication else f"ID: {log.medication_id}"
+                
                 adherence_data.append([
                     log.scheduled_time.strftime('%Y-%m-%d %H:%M'),
+                    Paragraph(med_name, styles['Normal']),
                     log.status.title(),
                     Paragraph(log.notes or '', styles['Normal'])
                 ])
         
-        adherence_table = Table(adherence_data, colWidths=[1.5*inch, 1*inch, 4.5*inch])
+        adherence_table = Table(adherence_data, colWidths=[1.5*inch, 2*inch, 0.75*inch, 2.75*inch])
         adherence_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34A853")),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -505,7 +538,7 @@ def generate_pdf_report(
             ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#BDE9C7")),
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (0, 1), (1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (2, -1), 'CENTER'), 
         ]))
         story.append(adherence_table)
         
@@ -516,19 +549,24 @@ def generate_pdf_report(
         pdf_buf.seek(0)
         logging.info("PDF built successfully. Returning StreamingResponse.")
         
+        # Use StreamingResponse for potentially large PDFs
         return StreamingResponse(
             pdf_buf, 
             media_type='application/pdf', 
             headers={
-                'Content-Disposition': 'attachment; filename="patient_report.pdf"'
+                # Suggest a filename to the browser
+                'Content-Disposition': f'attachment; filename="patient_report_{patient_id}_{from_date}_to_{to_date}.pdf"'
             }
         )
 
     except Exception as e:
-        logging.error(f"CRITICAL: Report generation failed with uncaught exception: {e}", exc_info=True)
+        # Basic error logging
+        logging.basicConfig(level=logging.INFO) # Ensure logger is configured
+        logging.error(f"CRITICAL: Report generation failed for patient {patient_id}: {e}", exc_info=True)
+        # Re-raise as HTTPException for FastAPI to handle
         raise HTTPException(
             status_code=500, 
-            detail=f"An internal error occurred during PDF generation: {e}"
+            detail=f"An internal error occurred during PDF generation." # Don't leak exception details
         )
     
 # Startup event to create database tables
@@ -540,17 +578,16 @@ async def startup_event():
         print("✅ Database tables created successfully")
     except Exception as e:
         print(f"❌ Error creating database tables: {e}")
-        # Don't crash the app, let it retry on next request
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",  # Local development
+        "http://localhost:3000",
         "https://care-giver-ten.vercel.app",
         "https://care-giver-git-main-traes-projects-9301e5d2.vercel.app",
-        "https://care-giver-traes-projects-9301e5d2.vercel.app",   # Vercel deployments (replace * with your app name)
-        os.getenv("FRONTEND_URL", "http://localhost:3000")  # Custom frontend URL
+        "https://care-giver-traes-projects-9301e5d2.vercel.app",
+        os.getenv("FRONTEND_URL", "http://localhost:3000")
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -574,14 +611,12 @@ def login(email: EmailStr, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     
     if not user:
-        # Auto-create user in demo mode
         name = email.split("@")[0].replace(".", " ").title()
         user = User(email=email, name=name, role="aide")
         db.add(user)
         db.commit()
         db.refresh(user)
     
-    # Update last login
     user.last_login = datetime.now(timezone.utc)
     db.commit()
     
@@ -657,7 +692,6 @@ def get_checkins(
     patient_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    # Query for standard check-ins
     checkin_query = db.query(CheckIn).filter(CheckIn.category != "Symptoms")
     if patient_id:
         checkin_query = checkin_query.filter(CheckIn.patient_id == patient_id)
@@ -666,22 +700,19 @@ def get_checkins(
     if category:
         checkin_query = checkin_query.filter(CheckIn.category == category)
     
-    # Query for symptom logs and transform them into a check-in-like structure
     symptom_query = db.query(SymptomLog)
     if patient_id:
         symptom_query = symptom_query.filter(SymptomLog.patient_id == patient_id)
     if user_id:
         symptom_query = symptom_query.filter(SymptomLog.user_id == user_id)
 
-    # Combine results
     all_checkins = checkin_query.all()
     symptom_logs = symptom_query.all()
 
-    # Convert symptom logs to a common format
     transformed_symptoms = []
     for log in symptom_logs:
         transformed_symptoms.append(CheckIn(
-            id=log.id,  # Note: This might cause ID conflicts if not handled on frontend
+            id=log.id, 
             user_id=log.user_id,
             patient_id=log.patient_id,
             category="Symptoms",
@@ -699,8 +730,6 @@ def get_checkins(
         ))
 
     combined_results = all_checkins + transformed_symptoms
-    
-    # Sort by timestamp descending
     combined_results.sort(key=lambda x: x.timestamp, reverse=True)
     
     return combined_results
@@ -779,7 +808,6 @@ def symptom_aggregation(
     group_by: str = "day",
     db: Session = Depends(get_db)
 ):
-    # Supported group_by: day, week, month
     query = db.query(SymptomLog)
 
     if user_id:
@@ -799,11 +827,10 @@ def symptom_aggregation(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid to_date format. Use YYYY-MM-DD")
 
-    # Build aggregation
     if group_by == "day":
         fmt = 'YYYY-MM-DD'
     elif group_by == "week":
-        fmt = 'IYYY-IW'  # ISO week format for PostgreSQL
+        fmt = 'IYYY-IW'
     elif group_by == "month":
         fmt = 'YYYY-MM'
     else:
@@ -820,7 +847,6 @@ def symptom_aggregation(
         .all()
     )
 
-    # Transform results into nested dict { period: { symptom_type: avg_severity } }
     out = {}
     for period, symptom_type, avg_severity in results:
         out.setdefault(period, {})[symptom_type] = avg_severity
@@ -829,16 +855,12 @@ def symptom_aggregation(
 
 @app.get("/api/checkins/medications")
 async def get_medication_checks(date: str, db: Session = Depends(get_db)):
-    # Convert date string to date object
     check_date = datetime.strptime(date, "%Y-%m-%d").date()
-    
-    # Query check-ins for this date
     check_ins = db.query(CheckIn).filter(
         CheckIn.category == "Medications",
         CheckIn.created_at >= check_date,
         CheckIn.created_at < check_date + timedelta(days=1)
     ).all()
-    
     return check_ins
 
 # Medication endpoints
@@ -896,7 +918,6 @@ def delete_medication(medication_id: int, db: Session = Depends(get_db)):
 @app.post("/api/medication-schedules", response_model=MedicationScheduleResponse)
 def create_medication_schedule(schedule: MedicationScheduleCreate, db: Session = Depends(get_db)):
     schedule_data = schedule.dict()
-    # If the rule isn't weekly, force day_of_week to be null
     if schedule_data.get("recurrence_rule") != "weekly":
         schedule_data["day_of_week"] = None
     
@@ -974,7 +995,6 @@ def list_medication_adherence(
 def get_patient_info(db: Session = Depends(get_db)):
     patient = db.query(PatientInfo).first()
     if not patient:
-        # Create default patient info
         patient = PatientInfo(
             name="Patient Name",
             age=75,
