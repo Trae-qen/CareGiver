@@ -668,6 +668,27 @@ def verify_user(email: EmailStr, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     return {"exists": user is not None}
 
+@app.post("/api/users", response_model=UserResponse)
+def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    """
+    Creates a new user (for Admins).
+    """
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create new user from Pydantic model
+    db_user = User(
+        email=user.email,
+        name=user.name,
+        role=user.role
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
 # User endpoints
 @app.get("/api/users", response_model=List[UserResponse])
 def get_users(db: Session = Depends(get_db)):
