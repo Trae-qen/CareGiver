@@ -210,6 +210,24 @@ class PatientInfo(Base):
     emergency_contact = Column(String)
     doctor = Column(String)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    
+    
+class PatientResponseShallow(BaseModel):
+    id: int
+    name: str
+    age: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+class UserResponseShallow(BaseModel):
+    id: int
+    name: str
+    role: str
+
+    class Config:
+        from_attributes = True
+    
 
 # Pydantic Models
 class PatientCreate(BaseModel):
@@ -406,21 +424,7 @@ class PatientInfoResponse(BaseModel):
         from_attributes = True
         
         
-class PatientResponseShallow(BaseModel):
-    id: int
-    name: str
-    age: Optional[int] = None
 
-    class Config:
-        from_attributes = True
-
-class UserResponseShallow(BaseModel):
-    id: int
-    name: str
-    role: str
-
-    class Config:
-        from_attributes = True
 
 # FastAPI app
 app = FastAPI(title="CareGiver API", version="1.0.0")
