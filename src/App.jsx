@@ -11,11 +11,14 @@ import InsightsView from './components/views/InsightsView';
 import MoreView from './components/views/MoreView';
 import AdminView from './components/views/AdminView';
 import LoginView from './components/views/LoginView';
-import { PatientSelectionView } from './views/PatientSelectionView';
+// Assuming this path is correct and you have this component
+import { PatientSelectionView } from './views/PatientSelectionView.jsx'; 
 import './App.css';
 
 function AppContent() {
-    const { isAuthenticated, isLoading, selectedPatient, user } = useAuth();
+    // --- UPDATED ---
+    // We now also get 'isPatientSelectionRequired' from our AuthContext
+    const { isAuthenticated, isLoading, selectedPatient, user, isPatientSelectionRequired } = useAuth();
     const { adherences } = useCheckIn();
     const [activeView, setActiveView] = useState('Today');
 
@@ -34,10 +37,17 @@ function AppContent() {
         return <LoginView />;
     }
 
-    // Show patient selection if logged in but no patient selected
-    if (!selectedPatient) {
+    // --- UPDATED ---
+    // We now check our new flag from the context.
+    // This will *only* be true if the user has 2 or more patients and hasn't picked one.
+    if (isPatientSelectionRequired) {
         return <PatientSelectionView />;
     }
+
+    // If selection is NOT required, we proceed.
+    // If user has 1 patient, `selectedPatient` will be set automatically.
+    // If user has 0 patients, `selectedPatient` will be null, and the app
+    // will (correctly) load with no patient selected.
 
 
     const renderView = () => {
@@ -67,7 +77,7 @@ function AppContent() {
     ];
 
     const navItems = [...baseNav];
-    if (user?.role === 'Admin') {
+    if (user?.role.toLowerCase() === 'admin') {
         navItems.push({ name: 'Admin', icon: 'admin' });
     }
     navItems.push({ name: 'More', icon: 'more' });

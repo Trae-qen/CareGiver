@@ -14,61 +14,83 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [selectedPatient, setSelectedPatient] = useState(null);
-    const [patients, setPatients] = useState([]);
+    const [patients, setPatients] = useState([]); // This will now *only* hold assigned patients
     const [isLoading, setIsLoading] = useState(true);
 
+    const [isPatientSelectionRequired, setIsPatientSelectionRequired] = useState(false);
+
+    // --- UPDATED ---
     // Check for stored user and patient on mount
     useEffect(() => {
         const storedUser = localStorage.getItem('caregiverUser');
-        const storedPatient = localStorage.getItem('selectedPatient');
         
         if (storedUser) {
-            setUser(JSON.parse(storedUser));
-        }
-        if (storedPatient) {
-            setSelectedPatient(JSON.parse(storedPatient));
+            const parsedUser = JSON.parse(storedUser);
+            setUser(parsedUser);
+
+            // Load this user's assigned patients from the stored object
+            const assignedPatients = parsedUser.assigned_patients || [];
+            setPatients(assignedPatients);
+
+            const storedPatient = localStorage.getItem('selectedPatient');
+            if (storedPatient) {
+                // User has a session AND a previously selected patient
+                setSelectedPatient(JSON.parse(storedPatient));
+                setIsPatientSelectionRequired(false);
+            } else if (assignedPatients.length > 1) {
+                // User has a session, but no patient selected, and has multiple to choose from
+                setIsPatientSelectionRequired(true);
+            } else if (assignedPatients.length === 1) {
+                // User has a session, auto-select their only patient
+                selectPatient(assignedPatients[0]); // selectPatient also saves to localStorage
+                setIsPatientSelectionRequired(false);
+            }
+            // else (0 patients), isPatientSelectionRequired remains false, app will show "no patients"
         }
         setIsLoading(false);
     }, []);
 
-    // Load patients when user logs in
-    useEffect(() => {
-        if (user) {
-            loadPatients();
-        }
-    }, [user]);
-
-    const loadPatients = async () => {
-        try {
-            const data = await patientAPI.getAll();
-            setPatients(data);
-            
-            // If no patient selected but patients exist, select the first one
-            if (!selectedPatient && data.length > 0) {
-                selectPatient(data[0]);
-            }
-        } catch (error) {
-            console.error('Failed to load patients:', error);
-        }
-    };
-
+    
+    // --- UPDATED ---
     const login = async (email) => {
         try {
-            // Call FastAPI backend
             const userData = await authAPI.login(email);
             
-            setUser(userData);
-            localStorage.setItem('caregiverUser', JSON.stringify(userData));
-            return userData;
+            if (!userData || !userData.id) {
+                throw new Error("Invalid user data received from API.");
+            }
+
+            localStorage.removeItem('selectedPatient');
+            setSelectedPatient(null);
+            const assignedPatients = userData.patients || []; 
+            const userWithPatients = { ...userData, assigned_patients: assignedPatients };
+            
+            setUser(userWithPatients);
+            localStorage.setItem('caregiverUser', JSON.stringify(userWithPatients));
+            setPatients(assignedPatients);
+
+            // Step 3: Run the selection logic (no change)
+            if (assignedPatients.length === 1) {
+                selectPatient(assignedPatients[0]);
+                setIsPatientSelectionRequired(false);
+            } else if (assignedPatients.length > 1) {
+                setIsPatientSelectionRequired(true);
+            } else {
+                setIsPatientSelectionRequired(false);
+            }
+
+            return userWithPatients;
         } catch (error) {
             console.error('Login failed:', error);
-            throw error;
+            throw error; 
         }
     };
 
     const logout = () => {
         setUser(null);
         setSelectedPatient(null);
+        setPatients([]); // Clear patient list
+        setIsPatientSelectionRequired(false); // Reset flag
         localStorage.removeItem('caregiverUser');
         localStorage.removeItem('selectedPatient');
     };
@@ -76,14 +98,32 @@ export const AuthProvider = ({ children }) => {
     const selectPatient = (patient) => {
         setSelectedPatient(patient);
         localStorage.setItem('selectedPatient', JSON.stringify(patient));
+        
+        // When a patient is selected, we are no longer in the "selection required" state
+        setIsPatientSelectionRequired(false);
     };
 
     const createPatient = async (patientData) => {
         try {
-            const newPatient = await patientAPI.create(patientData);
-            setPatients(prev => [...prev, newPatient]);
-            selectPatient(newPatient);
+            await patientAPI.create(patientData);
+            const userData = await authAPI.login(user.email); 
+            setUser(userData);
+            localStorage.setItem('caregiverUser', JSON.stringify(userData));
+
+            const patientList = userData.assigned_patients || [];
+            setPatients(patientList);
+            const newPatient = patientList.find(p => p.name === patientData.name);
+            
+            if (newPatient) {
+                selectPatient(newPatient); // Auto-select it
+            } else if (patientList.length === 1) {
+                selectPatient(patientList[0]); // Select the only one
+            } else {
+                // Couldn't find it, or list is > 1, show selection screen
+                setIsPatientSelectionRequired(true);
+            }
             return newPatient;
+
         } catch (error) {
             console.error('Failed to create patient:', error);
             throw error;
@@ -92,9 +132,15 @@ export const AuthProvider = ({ children }) => {
 
     const updatePatient = async (patientId, updates) => {
         try {
-            const updatedPatient = await patientAPI.update(patientId, updates);
-            setPatients(prev => prev.map(p => p.id === patientId ? updatedPatient : p));
-            if (selectedPatient?.id === patientId) {
+            await patientAPI.update(patientId, updates);
+            const userData = await authAPI.login(user.email); 
+            setUser(userData);
+            localStorage.setItem('caregiverUser', JSON.stringify(userData));
+
+            const patientList = userData.assigned_patients || [];
+            setPatients(patientList);
+            const updatedPatient = patientList.find(p => p.id === patientId);
+            if (updatedPatient) {
                 selectPatient(updatedPatient);
             }
             return updatedPatient;
@@ -117,14 +163,14 @@ export const AuthProvider = ({ children }) => {
         user,
         isLoading,
         isAuthenticated: !!user,
+        isPatientSelectionRequired, // --- NEWLY EXPOSED ---
         login,
         logout,
         selectedPatient,
-        patients,
+        patients, // This is now the user's *assigned* patient list
         selectPatient,
         createPatient,
         updatePatient,
-        loadPatients
     };
 
     return (
@@ -133,3 +179,4 @@ export const AuthProvider = ({ children }) => {
         </AuthContext.Provider>
     );
 };
+

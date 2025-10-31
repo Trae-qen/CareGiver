@@ -1,12 +1,86 @@
 import React from 'react';
+import { pushAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
 const MoreView = () => {
     const { user, logout } = useAuth();
 
+    // --- PASTE YOUR VAPID PUBLIC KEY HERE ---
+    // Get this from https://vapidkeys.com/
+    //Update this so it a env file for production
+    const VAPID_PUBLIC_KEY = 'BG7HqliTEQQO80k4pUjjRpu64MglVEoxJF3e4yM5v2WeLk3jmZfaFjV2D1t39IqLPGWmpQNCBapmFttVcAF_6Q4';
+
+    // --- ADD THIS HELPER FUNCTION ---
+    // This converts the VAPID key to the format the browser needs
+    const urlBase64ToUint8Array = (base64String) => {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    };
+    // --- END HELPER FUNCTION ---
+
     const handleLogout = () => {
         if (window.confirm('Are you sure you want to logout?')) {
             logout();
+        }
+    };
+
+    const handleNotificationClick = async () => {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            alert('Push notifications are not supported by this browser.');
+            return;
+        }
+
+        try {
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                alert('You have not granted permission for notifications.');
+                return;
+            }
+        } catch (error) {
+            console.error('Error requesting notification permission:', error);
+            return;
+        }
+
+        console.log('Registering service worker...');
+        let registration;
+        try {
+            registration = await navigator.serviceWorker.register('/service-worker.js');
+        } catch (error) {
+            console.error('Service Worker registration failed:', error);
+            return;
+        }
+
+        console.log('Getting push subscription...');
+        try {
+            const subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+            });
+
+            console.log('Push Subscription:', subscription);
+
+            if (user && user.id) {
+                const subscriptionJSON = subscription.toJSON();
+                
+                await pushAPI.subscribe(user.id, subscriptionJSON);
+                alert("Notifications successfully enabled!");
+            } else {
+                alert("Could not subscribe: User not found.");
+            }
+
+        } catch (error) {
+            if (error.name === 'NotAllowedError') {
+                 alert("You have not granted permission for notifications.");
+            } else {
+                console.error('Push subscription failed:', error);
+                alert('Failed to subscribe for notifications.');
+            }
         }
     };
 
@@ -46,7 +120,10 @@ const MoreView = () => {
                     </svg>
                 </button>
 
-                <button className="w-full bg-white p-4 rounded-xl shadow-sm flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <button 
+                    onClick={handleNotificationClick}
+                    className="w-full bg-white p-4 rounded-xl shadow-sm flex items-center justify-between hover:bg-gray-50 transition-colors"
+                >
                     <div className="flex items-center">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />

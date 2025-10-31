@@ -132,6 +132,31 @@ export const patientAPI = {
             body: JSON.stringify(updates),
         });
     },
+    assignAide: (patientId, userId) => fetchAPI(`/patients/${patientId}/assign-aide/${userId}`, {
+    method: 'POST'
+  }),
+  
+  removeAide: (patientId, userId) => fetchAPI(`/patients/${patientId}/remove-aide/${userId}`, {
+    method: 'DELETE'
+  }),
+};
+
+export const userAPI = {
+  getAll: () => fetchAPI('/users'),
+  getOne: (id) => fetchAPI(`/users/${id}`),
+  create: (userData) => fetchAPI('/users', {
+    method: 'POST',
+    body: JSON.stringify(userData)
+  }),
+  update: (id, userData) => fetchAPI(`/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(userData)
+  }),
+  delete: (id) => fetchAPI(`/users/${id}`, {
+    method: 'DELETE'
+  }),
+  
+  // You can add update/delete later
 };
 
 // Medication API endpoints
@@ -221,6 +246,25 @@ export const symptomAPI = {
     }
 };
 
+// Push Notification API endpoints
+export const pushAPI = {
+    /**
+     * Saves a new push subscription to the backend
+     * @param {number} userId - The ID of the user
+     * @param {PushSubscription} subscription - The subscription object from the browser
+     */
+    subscribe: async (userId, subscription) => {
+        return fetchAPI('/push/subscribe', {
+            method: 'POST',
+            body: JSON.stringify({
+                user_id: userId,
+                // 'subscription_data' is what our backend will expect
+                subscription_data: subscription 
+            }),
+        });
+    },
+};
+
 // Reminders API endpoints
 export const remindersAPI = {
     getAll: async () => {
@@ -247,6 +291,10 @@ export const remindersAPI = {
         });
     },
 };
+
+
+
+
 
 // Example usage in CheckInView.jsx:
 /*
@@ -275,4 +323,5 @@ export default {
     remindersAPI,
     symptomAPI,
     reportAPI,
+    pushAPI,
 };

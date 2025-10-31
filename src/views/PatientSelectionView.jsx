@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export const PatientSelectionView = () => {
+    // 'patients' here is the user's *assigned* patients list
     const { patients, selectPatient, createPatient, user } = useAuth();
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [selectedPatientId, setSelectedPatientId] = useState('');
@@ -45,8 +46,9 @@ export const PatientSelectionView = () => {
                 doctor: newPatient.doctor.trim() || null
             };
 
+            // This will create the patient, add it to our list, and auto-select it.
+            // App.jsx will then hide this view.
             await createPatient(patientData);
-            // Navigation happens automatically via App.jsx when selectedPatient changes
         } catch (error) {
             alert('Failed to create patient. Please try again.');
             console.error(error);
@@ -54,6 +56,10 @@ export const PatientSelectionView = () => {
             setIsLoading(false);
         }
     };
+    
+    // Show a different view if user *can* create patients but has none assigned
+    const canCreate = user?.role?.toLowerCase() === 'admin'; // Or any other role you allow
+    const hasNoPatients = patients.length === 0;
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4 md:p-8">
@@ -66,7 +72,9 @@ export const PatientSelectionView = () => {
                         </svg>
                     </div>
                     <h1 className="text-3xl font-bold text-gray-800 mb-2">Welcome, {user?.name}!</h1>
-                    <p className="text-gray-600">Which patient are you with today?</p>
+                    <p className="text-gray-600">
+                        {hasNoPatients && !canCreate ? "You are not yet assigned to any patients." : "Which patient are you with today?"}
+                    </p>
                 </div>
 
                 {/* Selection Card */}
@@ -74,7 +82,7 @@ export const PatientSelectionView = () => {
                     {!showCreateForm ? (
                         <div>
                             {/* Patient Selection */}
-                            {patients.length > 0 && (
+                            {!hasNoPatients && (
                                 <>
                                     <div className="mb-6">
                                         <label htmlFor="patient-select" className="block text-sm font-semibold text-gray-700 mb-2">
@@ -102,28 +110,33 @@ export const PatientSelectionView = () => {
                                     >
                                         Continue
                                     </button>
-
-                                    <div className="relative my-6">
-                                        <div className="absolute inset-0 flex items-center">
-                                            <div className="w-full border-t border-gray-200"></div>
-                                        </div>
-                                        <div className="relative flex justify-center text-sm">
-                                            <span className="px-4 bg-white text-gray-500">or</span>
-                                        </div>
-                                    </div>
                                 </>
                             )}
+                            
+                            {/* Show "or" separator if both selection and creation are possible */}
+                            {!hasNoPatients && canCreate && (
+                                <div className="relative my-6">
+                                    <div className="absolute inset-0 flex items-center">
+                                        <div className="w-full border-t border-gray-200"></div>
+                                    </div>
+                                    <div className="relative flex justify-center text-sm">
+                                        <span className="px-4 bg-white text-gray-500">or</span>
+                                    </div>
+                                </div>
+                            )}
 
-                            {/* Add New Patient Button */}
-                            <button 
-                                onClick={() => setShowCreateForm(true)}
-                                className="w-full py-3 border-2 border-blue-500 text-blue-600 font-semibold rounded-xl hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                </svg>
-                                Add New Patient
-                            </button>
+                            {/* Add New Patient Button (Only show if allowed) */}
+                            {canCreate && (
+                                <button 
+                                    onClick={() => setShowCreateForm(true)}
+                                    className="w-full py-3 border-2 border-blue-500 text-blue-600 font-semibold rounded-xl hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    Add New Patient
+                                </button>
+                            )}
                         </div>
                     ) : (
                         <form onSubmit={handleCreatePatient}>
@@ -224,3 +237,4 @@ export const PatientSelectionView = () => {
         </div>
     );
 };
+

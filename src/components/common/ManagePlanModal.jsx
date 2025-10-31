@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { medicationScheduleAPI } from '../../services/api';
 import AppIcon from './AppIcon';
 import { useCarePlan } from '../../context/CarePlanContext';
 import { useAuth } from '../../context/AuthContext';
 
-const ManagePlanModal = ({ isOpen, onClose }) => {
-    const { medications, patientInfo, updateMedication, updatePatientInfo, addMedication, deleteMedication } = useCarePlan();
-    const { user, selectedPatient } = useAuth();
+const ManagePlanModal = ({ isOpen, onClose}) => {
+    const { medications, patientInfo, updateMedication, updatePatientInfo, addMedication, deleteMedication } = useCarePlan();    const { user, selectedPatient } = useAuth();
     const [activeTab, setActiveTab] = useState('overview');
     const [showAddMedModal, setShowAddMedModal] = useState(false);
     const [newMedication, setNewMedication] = useState({
@@ -30,17 +29,39 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
         day_of_week: 'monday', // Add this
         notes: ''
     });
+    const [aideToAssign, setAideToAssign] = useState('');
 
     useEffect(() => {
-        if (activeTab === 'schedule') {
+        // Fetch schedules when the modal opens, not just when the tab is clicked
+        if (isOpen && selectedPatient) {
             setLoadingSchedules(true);
-            medicationScheduleAPI.getAll().then(setSchedules).finally(() => setLoadingSchedules(false));
+            // Pass the patient_id so you only get schedules for this patient
+            medicationScheduleAPI.getAll({ patient_id: selectedPatient.id })
+                .then(setSchedules)
+                .catch(error => console.error("Failed to load schedules", error))
+                .finally(() => setLoadingSchedules(false));
+        } else if (!isOpen) {
+            // Clear data when modal closes
+            setSchedules([]);
         }
-    }, [activeTab]);
+    }, [isOpen, selectedPatient]);
     // --- MOVED HOOKS END ---
+
+   const currentAideIds = useMemo(() => {
+        // We use (selectedPatient?.aides || []) as a "guard"
+        // This says: if selectedPatient exists, use its .aides,
+        // otherwise, use an empty array []. This prevents the crash.
+        return new Set((selectedPatient?.aides || []).map(a => a.id));
+    }, [selectedPatient?.aides]);
+
+    
+
 
 
     if (!isOpen) return null;
+    if (!selectedPatient) {
+        return null;
+    }
 
     const tabs = [
         { id: 'overview', name: 'Overview', icon: 'check-in' },
@@ -68,75 +89,98 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
         }
     };
 
-    const renderOverview = () => (
-        <div className="space-y-4">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="font-semibold text-blue-900 mb-2">Care Plan Summary</h3>
-                <div className="space-y-2 text-sm text-blue-800">
-                    <p>• <strong>{medications.filter(m => m.active).length}</strong> active medications</p>
-                    <p>• <strong>3</strong> daily check-ins scheduled</p>
-                    <p>• <strong>2</strong> vital measurements required</p>
-                    <p>• Last updated: Oct 15, 2025</p>
+    
+
+    const renderOverview = () => {
+        // Calculate dynamic stats
+        const activeMeds = medications.filter(m => m.active).length;
+        const totalSchedules = schedules.length;
+        const dailySchedules = schedules.filter(s => s.recurrence_rule === 'daily').length;
+        const weeklySchedules = schedules.filter(s => s.recurrence_rule === 'weekly').length;
+
+        const capitalize = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+
+        return (
+            <div className="space-y-4">
+                {/* 1. Care Plan Summary (Now Dynamic) */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h3 className="font-semibold text-blue-900 mb-2">Care Plan Summary</h3>
+                    {loadingSchedules ? (
+                        <div className="text-sm text-blue-800">Loading summary...</div>
+                    ) : (
+                        <div className="space-y-2 text-sm text-blue-800">
+                            <p>• <strong>{activeMeds}</strong> active medications</p>
+                            <p>• <strong>{totalSchedules}</strong> total medication schedules</p>
+                            <p>• <strong>{dailySchedules}</strong> daily schedules</p>
+                            <p>• <strong>{weeklySchedules}</strong> weekly schedules</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* 2. Medication Schedules (Now Dynamic) */}
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                    <h3 className="font-semibold text-gray-900 mb-3">Medication Schedules</h3>
+                    {loadingSchedules ? (
+                        <div className="text-sm text-gray-500">Loading schedules...</div>
+                    ) : schedules.length === 0 ? (
+                        <div className="text-sm text-gray-500">No medication schedules have been added.</div>
+                    ) : (
+                        <div className="space-y-3">
+                            {/* Show a preview of the first 3 schedules */}
+                            {schedules.slice(0, 3).map(sch => {
+                                const med = medications.find(m => m.id === sch.medication_id);
+                                return (
+                                    <div key={sch.id} className="flex items-center justify-between pb-2 border-b last:border-b-0">
+                                        <div className="flex items-center">
+                                            <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center mr-3 flex-shrink-0">
+                                                <AppIcon name="medication" className="w-5 h-5 text-violet-600" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-medium">{med?.name || 'Medication'}</p>
+                                                <p className="text-xs text-gray-500">
+                                                    {sch.recurrence_rule === 'weekly' && sch.day_of_week
+                                                        ? `Weekly on ${capitalize(sch.day_of_week)}`
+                                                        : capitalize(sch.recurrence_rule)
+                                                    }
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <span className="text-sm font-medium text-gray-800 ml-2">{sch.time_of_day}</span>
+                                    </div>
+                                );
+                            })}
+                            {schedules.length > 3 && (
+                                <p className="text-xs text-gray-500 text-center pt-2">
+                                    ...and {schedules.length - 3} more. See 'Schedule' tab for details.
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* 3. Important Notes (Now Dynamic from patientInfo) */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <h3 className="font-semibold text-amber-900 mb-3 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        Important Patient Info
+                    </h3>
+                    <ul className="text-sm text-amber-800 space-y-2">
+                        <li>
+                            <strong>Allergies:</strong> {patientInfo.allergies || 'N/A'}
+                        </li>
+                        <li>
+                            <strong>Primary Doctor:</strong> {patientInfo.doctor || 'N/A'}
+                        </li>
+                        <li>
+                            <strong>Emergency Contact:</strong> {patientInfo.emergencyContact || 'N/A'}
+                        </li>
+                    </ul>
                 </div>
             </div>
-
-            <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h3 className="font-semibold text-gray-900 mb-3">Today's Schedule</h3>
-                <div className="space-y-3">
-                    <div className="flex items-center justify-between pb-2 border-b">
-                        <div className="flex items-center">
-                            <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center mr-3">
-                                <AppIcon name="medication" className="w-5 h-5 text-violet-600" />
-                            </div>
-                            <div>
-                                <p className="text-sm font-medium">Morning Medications</p>
-                                <p className="text-xs text-gray-500">8:00 AM</p>
-                            </div>
-                        </div>
-                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Completed</span>
-                    </div>
-                    <div className="flex items-center justify-between pb-2 border-b">
-                        <div className="flex items-center">
-                            <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center mr-3">
-                                <AppIcon name="measurements" className="w-5 h-5 text-green-600" />
-                            </div>
-                            <div>
-                                <p className="text-sm font-medium">Blood Pressure Check</p>
-                                <p className="text-xs text-gray-500">12:00 PM</p>
-                            </div>
-                        </div>
-                        <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Pending</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center">
-                            <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center mr-3">
-                                <AppIcon name="medication" className="w-5 h-5 text-violet-600" />
-                            </div>
-                            <div>
-                                <p className="text-sm font-medium">Evening Medications</p>
-                                <p className="text-xs text-gray-500">8:00 PM</p>
-                            </div>
-                        </div>
-                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">Upcoming</span>
-                    </div>
-                </div>
-            </div>
-
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <h3 className="font-semibold text-amber-900 mb-2 flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    Important Notes
-                </h3>
-                <ul className="text-sm text-amber-800 space-y-1">
-                    <li>• Allergic to Penicillin</li>
-                    <li>• Take blood pressure medication with food</li>
-                    <li>• Monitor for dizziness</li>
-                </ul>
-            </div>
-        </div>
-    );
+        );
+    };
 
     const renderMedications = () => (
         <div className="space-y-4">
@@ -202,11 +246,14 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
     const handleAddSchedule = async () => {
         if (!newSchedule.medication_id || !newSchedule.time_of_day) return;
         
+        const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
         // 1. Build the payload
         const scheduleWithIds = {
             ...newSchedule,
             user_id: user?.id,
-            patient_id: selectedPatient?.id
+            patient_id: selectedPatient?.id,
+            timezone: userTimezone
         };
 
         // 2. Clean up the payload: remove day_of_week if not weekly
@@ -440,7 +487,7 @@ const ManagePlanModal = ({ isOpen, onClose }) => {
                 <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-t-2xl">
                     <div className="flex items-center justify-between">
                         <div>
-                            <h2 className="text-2xl font-bold">Manage Patient</h2>
+                            <h2 className="text-2xl font-bold">Manage Patient: {selectedPatient.name}</h2>
                             <p className="text-blue-100 text-sm mt-1">Configure patient information, care and medications</p>
                         </div>
                         <button
