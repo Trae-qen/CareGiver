@@ -692,18 +692,23 @@ def health_check():
 # Authentication endpoints
 @app.post("/api/auth/login", response_model=UserResponse)
 def login(email: EmailStr, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
+    # --- UPDATED ---
+    # We now pre-load the user's assigned patients in the same query
+    user = db.query(User).options(
+        joinedload(User.patients)
+    ).filter(User.email == email).first()
     
     if not user:
-        name = email.split("@")[0].replace(".", " ").title()
-        user = User(email=email, name=name, role="aide")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        # --- CRITICAL FIX ---
+        # If no user is found, do NOT create one. Raise an error.
+        raise HTTPException(status_code=404, detail="User not found. Please check with your administrator.")
     
     user.last_login = datetime.now(timezone.utc)
     db.commit()
     
+    # Return the user object.
+    # The UserResponse model will serialize the 'patients' relationship,
+    # and your frontend AuthContext will pick it up as 'assigned_patients'
     return user
 
 @app.get("/api/auth/verify")
@@ -799,10 +804,20 @@ def create_patient(patient: PatientCreate, db: Session = Depends(get_db)):
     return db_patient
 
 @app.get("/api/patients", response_model=List[PatientResponse])
-def get_patients(db: Session = Depends(get_db)):
-    patients = db.query(Patient).options(
+def get_patients(
+    user_id: Optional[int] = None, # Add the optional query parameter
+    db: Session = Depends(get_db)
+):
+    query = db.query(Patient).options(
         joinedload(Patient.aides)
-    ).all()
+    )
+    
+    if user_id:
+        query = query.join(patient_user_association).filter(
+            patient_user_association.c.user_id == user_id
+        )
+    
+    patients = query.all()
     return patients
 
 @app.get("/api/patients/{patient_id}", response_model=PatientResponse)
