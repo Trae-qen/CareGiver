@@ -49,6 +49,11 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+patient_user_association = Table('patient_user_association', Base.metadata,
+    Column('user_id', Integer, ForeignKey('users.id'), primary_key=True),
+    Column('patient_id', Integer, ForeignKey('patients.id'), primary_key=True)
+)
+
 def now_utc():
     return datetime.now(timezone.utc)
 
@@ -67,6 +72,12 @@ class Patient(Base):
     
     medications = relationship("Medication", back_populates="patient")
     checkins = relationship("CheckIn", back_populates="patient")
+    
+    aides = relationship(
+        "User",
+        secondary=patient_user_association,
+        back_populates="patients"
+    )
 
 class User(Base):
     __tablename__ = "users"
@@ -79,8 +90,13 @@ class User(Base):
     last_login = Column(DateTime(timezone=True))
     
     checkins = relationship("CheckIn", back_populates="user")
-    # Added relationship for push subscriptions
     push_subscriptions = relationship("PushSubscription", back_populates="user")
+    
+    patients = relationship(
+        "Patient",
+        secondary=patient_user_association,
+        back_populates="aides"
+    )
 
 class CheckIn(Base):
     __tablename__ = "checkins"
@@ -210,6 +226,7 @@ class PatientResponse(BaseModel):
     allergies: Optional[str]
     emergency_contact: Optional[str]
     doctor: Optional[str]
+    aides: List[UserResponseShallow] = []
     
     class Config:
         from_attributes = True
@@ -218,12 +235,17 @@ class UserCreate(BaseModel):
     email: EmailStr
     name: str
     role: Optional[str] = "aide"
+    
+class UserUpdate(BaseModel):
+    name: str
+    role: str
 
 class UserResponse(BaseModel):
     id: int
     email: str
     name: str
     role: str
+    patients: List[PatientResponseShallow] = []
     
     class Config:
         from_attributes = True
@@ -380,6 +402,23 @@ class PatientInfoResponse(BaseModel):
     emergency_contact: Optional[str]
     doctor: Optional[str]
     
+    class Config:
+        from_attributes = True
+        
+        
+class PatientResponseShallow(BaseModel):
+    id: int
+    name: str
+    age: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+class UserResponseShallow(BaseModel):
+    id: int
+    name: str
+    role: str
+
     class Config:
         from_attributes = True
 
@@ -692,15 +731,59 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
 # User endpoints
 @app.get("/api/users", response_model=List[UserResponse])
 def get_users(db: Session = Depends(get_db)):
-    users = db.query(User).all()
+    users = db.query(User).options(
+        joinedload(User.patients)
+    ).all()
     return users
 
 @app.get("/api/users/{user_id}", response_model=UserResponse)
 def get_user(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).options(
+            joinedload(User.patients)
+        ).filter(User.id == user_id).first()    
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+@app.put("/api/users/{user_id}", response_model=UserResponse)
+def update_user(user_id: int, user_updates: UserUpdate, db: Session = Depends(get_db)):
+    """
+    Updates a user's name and role.
+    """
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update the fields from the Pydantic model
+    db_user.name = user_updates.name
+    db_user.role = user_updates.role
+    
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    """
+    Deletes a user.
+    """
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    try:
+        db.delete(db_user)
+        db.commit()
+        return {"message": "User deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        log.error(f"Failed to delete user {user_id}: {e}", exc_info=True)
+        # This is likely a foreign key constraint error
+        raise HTTPException(
+            status_code=409, 
+            detail="Cannot delete user. They may have existing records (check-ins, schedules) linked to them."
+        )
 
 # Patient endpoints
 @app.post("/api/patients", response_model=PatientResponse)
@@ -713,12 +796,16 @@ def create_patient(patient: PatientCreate, db: Session = Depends(get_db)):
 
 @app.get("/api/patients", response_model=List[PatientResponse])
 def get_patients(db: Session = Depends(get_db)):
-    patients = db.query(Patient).all()
+    patients = db.query(Patient).options(
+        joinedload(Patient.aides)
+    ).all()
     return patients
 
 @app.get("/api/patients/{patient_id}", response_model=PatientResponse)
 def get_patient(patient_id: int, db: Session = Depends(get_db)):
-    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    patient = db.query(Patient).options(
+        joinedload(Patient.aides)
+    ).filter(Patient.id == patient_id).first()
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     return patient
@@ -735,6 +822,82 @@ def update_patient(patient_id: int, updates: PatientCreate, db: Session = Depend
     patient.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(patient)
+    return patient
+
+
+@app.post("/api/patients/{patient_id}/assign-aide/{user_id}", response_model=PatientResponse)
+def assign_aide_to_patient(patient_id: int, user_id: int, db: Session = Depends(get_db)):
+    """Assigns a user (aide) to a patient's care team."""
+    patient = db.query(Patient).options(joinedload(Patient.aides)).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user not in patient.aides:
+        patient.aides.append(user)
+        db.commit()
+        db.refresh(patient)
+    
+    return patient
+
+
+@app.delete("/api/patients/{patient_id}/remove-aide/{user_id}", response_model=PatientResponse)
+def remove_aide_from_patient(patient_id: int, user_id: int, db: Session = Depends(get_db)):
+    """Removes a user (aide) from a patient's care team."""
+    patient = db.query(Patient).options(joinedload(Patient.aides)).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user in patient.aides:
+        patient.aides.remove(user)
+        db.commit()
+        db.refresh(patient)
+    
+    return patient
+
+
+
+@app.post("/api/patients/{patient_id}/assign-aide/{user_id}", response_model=PatientResponse)
+def assign_aide_to_patient(patient_id: int, user_id: int, db: Session = Depends(get_db)):
+    """Assigns a user (aide) to a patient's care team."""
+    patient = db.query(Patient).options(joinedload(Patient.aides)).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user not in patient.aides:
+        patient.aides.append(user)
+        db.commit()
+        db.refresh(patient)
+    
+    return patient
+
+@app.delete("/api/patients/{patient_id}/remove-aide/{user_id}", response_model=PatientResponse)
+def remove_aide_from_patient(patient_id: int, user_id: int, db: Session = Depends(get_db)):
+    """Removes a user (aide) from a patient's care team."""
+    patient = db.query(Patient).options(joinedload(Patient.aides)).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user in patient.aides:
+        patient.aides.remove(user)
+        db.commit()
+        db.refresh(patient)
+    
     return patient
 
 # Check-in endpoints
