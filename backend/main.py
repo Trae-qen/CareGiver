@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+import pytz
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
@@ -1205,56 +1206,85 @@ def _send_notification_to_user(user_id: int, title: str, body: str):
 
 def check_and_send_medication_reminders():
     """
-    This job runs every minute, checks the DB for due medications,
-    and sends push notifications.
+    This job runs every minute, checks all unique timezones in the database,
+    and sends notifications to users if their local time matches a schedule.
     """
-    log.info("SCHEDULER: Running medication reminder check...")
+    log.info("SCHEDULER: Running timezone-aware medication reminder check...")
     
-    # We must create a new session because this runs in a background thread
     with get_db_session() as db:
         try:
+            # 1. Get the current time in UTC
             now_utc = datetime.now(timezone.utc)
-            # Format: 'HH:MM' (e.g., '08:30')
-            current_time_str = now_utc.strftime('%H:%M') 
-            # Format: 'monday', 'tuesday', etc.
-            current_day_str = now_utc.strftime('%A').lower() 
 
-            # Find all active schedules due at this exact minute
-            schedules_due_now = db.query(MedicationSchedule).options(
-                joinedload(MedicationSchedule.medication) # Load the medication info
+            # 2. Find all unique timezones from all schedules in the DB
+            # This query returns a list like [('America/Chicago',), ('America/New_York',)]
+            unique_timezones = db.query(
+                distinct(MedicationSchedule.timezone)
             ).filter(
-                MedicationSchedule.active == True,
-                MedicationSchedule.time_of_day == current_time_str,
-                MedicationSchedule.user_id.isnot(None) # Must have a user to notify
+                MedicationSchedule.timezone.isnot(None)
             ).all()
 
-            if not schedules_due_now:
-                log.info("SCHEDULER: No medications due this minute.")
+            if not unique_timezones:
+                log.info("SCHEDULER: No schedules with timezones found. Exiting check.")
                 return
 
-            log.info(f"SCHEDULER: Found {len(schedules_due_now)} schedules due.")
+            # Convert list of tuples to a simple set
+            timezones_to_check = {tz[0] for tz in unique_timezones}
+            log.info(f"SCHEDULER: Checking schedules for timezones: {timezones_to_check}")
 
-            for schedule in schedules_due_now:
-                # Check recurrence rules (this matches your frontend logic)
-                is_due_today = (
-                    schedule.recurrence_rule == 'daily' or
-                    (schedule.recurrence_rule == 'weekly' and schedule.day_of_week == current_day_str)
-                )
+            # 3. For each unique timezone, find out what the local time is
+            for tz_name in timezones_to_check:
+                try:
+                    # Get the current time in this specific timezone
+                    local_tz = pytz.timezone(tz_name)
+                    local_dt = now_utc.astimezone(local_tz)
+                    
+                    # Format: 'HH:MM' (e.g., '10:59')
+                    current_local_time_str = local_dt.strftime('%H:%M')
+                    # Format: 'monday', 'tuesday', etc.
+                    current_local_day_str = local_dt.strftime('%A').lower()
 
-                if is_due_today and schedule.medication:
-                    log.info(f"SCHEDULER: Sending reminder for '{schedule.medication.name}' to user {schedule.user_id}")
-                    
-                    title = "Medication Reminder"
-                    body = f"It's time to take {schedule.medication.name} ({schedule.medication.dosage})."
-                    
-                    _send_notification_to_user(
-                        user_id=schedule.user_id,
-                        title=title,
-                        body=body,
-                        
-                    )
+                    # 4. Now, query the DB for schedules matching this LOCAL time
+                    schedules_due_now = db.query(MedicationSchedule).options(
+                        joinedload(MedicationSchedule.medication)
+                    ).filter(
+                        MedicationSchedule.active == True,
+                        MedicationSchedule.user_id.isnot(None),
+                        MedicationSchedule.timezone == tz_name, # <-- Key
+                        MedicationSchedule.time_of_day == current_local_time_str # <-- Key
+                    ).all()
+
+                    if not schedules_due_now:
+                        continue # Go to the next timezone
+
+                    log.info(f"SCHEDULER: Found {len(schedules_due_now)} schedules due for {tz_name} at {current_local_time_str}")
+
+                    # 5. Send notifications
+                    for schedule in schedules_due_now:
+                        is_due_today = (
+                            schedule.recurrence_rule == 'daily' or
+                            (schedule.recurrence_rule == 'weekly' and schedule.day_of_week == current_local_day_str)
+                        )
+
+                        if is_due_today and schedule.medication:
+                            log.info(f"SCHEDULER: Sending reminder for '{schedule.medication.name}' to user {schedule.user_id}")
+                            
+                            title = "Medication Reminder"
+                            body = f"It's time to take {schedule.medication.name} ({schedule.medication.dosage})."
+                            
+                            _send_notification_to_user(
+                                user_id=schedule.user_id,
+                                title=title,
+                                body=body
+                            )
+                
+                except pytz.UnknownTimeZoneError:
+                    log.warning(f"SCHEDULER: Skipping invalid timezone in database: {tz_name}")
+                except Exception as e:
+                    log.error(f"SCHEDULER: Error processing timezone {tz_name}: {e}", exc_info=True)
+
         except Exception as e:
-            log.error(f"SCHEDULER: Error during reminder check: {e}", exc_info=True)
+            log.error(f"SCHEDULER: Critical error during reminder check: {e}", exc_info=True)
             db.rollback()
 
 if __name__ == "__main__":
