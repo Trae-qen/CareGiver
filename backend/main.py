@@ -13,7 +13,7 @@ import io
 from reportlab.lib.pagesizes import letter
 # Removed unused canvas import
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table as ReportLabTable, TableStyle, Image, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
@@ -546,7 +546,7 @@ def generate_pdf_report(
                     Paragraph(log.notes or '', styles['Normal']) 
                 ])
 
-        symptom_table = Table(symptom_data, colWidths=[1.5*inch, 1.5*inch, 0.75*inch, 3.25*inch])
+        symptom_table = ReportLabTable(symptom_data, colWidths=[1.5*inch, 1.5*inch, 0.75*inch, 3.25*inch])
         symptom_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4A90E2")),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -581,7 +581,7 @@ def generate_pdf_report(
                     Paragraph(log.notes or '', styles['Normal'])
                 ])
         
-        adherence_table = Table(adherence_data, colWidths=[1.5*inch, 2*inch, 0.75*inch, 2.75*inch])
+        adherence_table = ReportLabTable(adherence_data, colWidths=[1.5*inch, 2*inch, 0.75*inch, 2.75*inch])
         adherence_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34A853")),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
