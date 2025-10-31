@@ -1130,7 +1130,7 @@ def send_notification(
         user_id=user_id,
         title=payload.title,
         body=payload.body,
-        db=db
+        
     )
     
     if success == 0 and fail == 0 and db.query(PushSubscription).filter(PushSubscription.user_id == user_id).count() == 0:
@@ -1152,52 +1152,55 @@ def get_db_session():
     finally:
         db.close()
 
-def _send_notification_to_user(user_id: int, title: str, body: str, db: Session):
+def _send_notification_to_user(user_id: int, title: str, body: str):
     """
     Helper function to send a notification to all of a user's subscriptions.
+    It manages its own database session.
     """
-    vapid_private_key = os.getenv("VAPID_PRIVATE_KEY")
-    vapid_claim_email = os.getenv("VAPID_CLAIM_EMAIL")
-    
-    if not vapid_private_key or not vapid_claim_email:
-        log.error(f"VAPID keys not set. Cannot send notification to user {user_id}")
-        return 0, 0 # success, fail
+    # This function now gets its OWN database session
+    with get_db_session() as db:
+        vapid_private_key = os.getenv("VAPID_PRIVATE_KEY")
+        vapid_claim_email = os.getenv("VAPID_CLAIM_EMAIL")
+        
+        if not vapid_private_key or not vapid_claim_email:
+            log.error(f"VAPID keys not set. Cannot send notification to user {user_id}")
+            return 0, 0 # success, fail
 
-    subscriptions = db.query(PushSubscription).filter(
-        PushSubscription.user_id == user_id
-    ).all()
+        subscriptions = db.query(PushSubscription).filter(
+            PushSubscription.user_id == user_id
+        ).all()
 
-    if not subscriptions:
-        log.warning(f"No push subscriptions found for user {user_id}")
-        return 0, 0
+        if not subscriptions:
+            log.warning(f"No push subscriptions found for user {user_id}")
+            return 0, 0
 
-    log.info(f"Sending notification to {len(subscriptions)} subscription(s) for user {user_id}")
-    
-    success_count = 0
-    failure_count = 0
-    payload = json.dumps({"title": title, "body": body})
-    
-    for sub in subscriptions:
-        try:
-            webpush(
-                subscription_info=sub.subscription_data,
-                data=payload,
-                vapid_private_key=vapid_private_key,
-                vapid_claims={"sub": vapid_claim_email}
-            )
-            success_count += 1
-        except WebPushException as ex:
-            log.warning(f"Failed to send push: {ex}")
-            if ex.response and ex.response.status_code == 410:
-                log.info(f"Subscription {sub.id} is expired. Deleting.")
-                db.delete(sub)
-            failure_count += 1
-        except Exception as e:
-            log.error(f"An unknown error occurred sending push: {e}")
-            failure_count += 1
-            
-    db.commit() # Save any deletions
-    return success_count, failure_count
+        log.info(f"Sending notification to {len(subscriptions)} subscription(s) for user {user_id}")
+        
+        success_count = 0
+        failure_count = 0
+        payload = json.dumps({"title": title, "body": body})
+        
+        for sub in subscriptions:
+            try:
+                webpush(
+                    subscription_info=sub.subscription_data,
+                    data=payload,
+                    vapid_private_key=vapid_private_key,
+                    vapid_claims={"sub": vapid_claim_email}
+                )
+                success_count += 1
+            except WebPushException as ex:
+                log.warning(f"Failed to send push: {ex}")
+                if ex.response and ex.response.status_code == 410:
+                    log.info(f"Subscription {sub.id} is expired. Deleting.")
+                    db.delete(sub)
+                failure_count += 1
+            except Exception as e:
+                log.error(f"An unknown error occurred sending push: {e}")
+                failure_count += 1
+                
+        db.commit() # Save any deletions
+        return success_count, failure_count
 
 
 def check_and_send_medication_reminders():
@@ -1248,7 +1251,7 @@ def check_and_send_medication_reminders():
                         user_id=schedule.user_id,
                         title=title,
                         body=body,
-                        db=db
+                        
                     )
         except Exception as e:
             log.error(f"SCHEDULER: Error during reminder check: {e}", exc_info=True)
