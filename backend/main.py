@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pytz
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, func, distinct
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, func, distinct, Table
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship, joinedload
@@ -822,44 +822,6 @@ def update_patient(patient_id: int, updates: PatientCreate, db: Session = Depend
     patient.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(patient)
-    return patient
-
-
-@app.post("/api/patients/{patient_id}/assign-aide/{user_id}", response_model=PatientResponse)
-def assign_aide_to_patient(patient_id: int, user_id: int, db: Session = Depends(get_db)):
-    """Assigns a user (aide) to a patient's care team."""
-    patient = db.query(Patient).options(joinedload(Patient.aides)).filter(Patient.id == patient_id).first()
-    if not patient:
-        raise HTTPException(status_code=404, detail="Patient not found")
-        
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if user not in patient.aides:
-        patient.aides.append(user)
-        db.commit()
-        db.refresh(patient)
-    
-    return patient
-
-
-@app.delete("/api/patients/{patient_id}/remove-aide/{user_id}", response_model=PatientResponse)
-def remove_aide_from_patient(patient_id: int, user_id: int, db: Session = Depends(get_db)):
-    """Removes a user (aide) from a patient's care team."""
-    patient = db.query(Patient).options(joinedload(Patient.aides)).filter(Patient.id == patient_id).first()
-    if not patient:
-        raise HTTPException(status_code=404, detail="Patient not found")
-        
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if user in patient.aides:
-        patient.aides.remove(user)
-        db.commit()
-        db.refresh(patient)
-    
     return patient
 
 
