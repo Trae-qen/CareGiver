@@ -97,10 +97,19 @@ export const AuthProvider = ({ children }) => {
 
     const selectPatient = (patient) => {
         setSelectedPatient(patient);
-        localStorage.setItem('selectedPatient', JSON.stringify(patient));
         
-        // When a patient is selected, we are no longer in the "selection required" state
-        setIsPatientSelectionRequired(false);
+        if (patient) {
+            // If we are SELECTING a real patient:
+            localStorage.setItem('selectedPatient', JSON.stringify(patient));
+            setIsPatientSelectionRequired(false);
+        } else {
+            // If we are DESELECTING (changing) a patient:
+            localStorage.removeItem('selectedPatient');
+            // Check if we need to show the selector screen
+            if (patients.length > 1) {
+                setIsPatientSelectionRequired(true);
+            }
+        }
     };
 
     const createPatient = async (patientData) => {

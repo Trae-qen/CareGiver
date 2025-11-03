@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import AppIcon from '../common/AppIcon';
 import AddItemModal from '../common/AddItemModal';
-import ManagePlanModal from '../common/ManagePlanModal';
 import { useCheckIn } from '../../context/CheckInContext';
 import { useAuth } from '../../context/AuthContext';
 import { mockCategories } from '../../data/mockData';
@@ -12,7 +11,6 @@ const CheckInView = () => {
     const { addCheckIn, recordMedicationTaken } = useCheckIn();
     const { user, selectedPatient } = useAuth();
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState(null);
     const [showBanner, setShowBanner] = useState(true);
 
@@ -60,14 +58,6 @@ const CheckInView = () => {
         <div className="p-4 bg-gray-50 min-h-full">
             <header className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-bold text-gray-800">Check-In</h1>
-                <button 
-                    onClick={() => setIsPlanModalOpen(true)}
-                    className="flex items-center space-x-2 bg-white px-3 py-2 rounded-full shadow-sm text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0h18M12 15.75h.008v.008H12v-.008z" /></svg>
-                    <span>Manage Patient</span>
-                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                </button>
             </header>
 
             {showBanner && (
@@ -109,11 +99,6 @@ const CheckInView = () => {
                 onClose={() => setIsModalOpen(false)}
                 category={selectedCategory}
                 onSave={handleSave}
-            />
-
-            <ManagePlanModal
-                isOpen={isPlanModalOpen}
-                onClose={() => setIsPlanModalOpen(false)}
             />
         </div>
     );

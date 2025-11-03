@@ -3,11 +3,9 @@ import { pushAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
 const MoreView = () => {
-    const { user, logout } = useAuth();
+    const { user, logout, selectPatient, patients } = useAuth();
 
-    // --- PASTE YOUR VAPID PUBLIC KEY HERE ---
-    // Get this from https://vapidkeys.com/
-    //Update this so it a env file for production
+    
     const VAPID_PUBLIC_KEY = 'BG7HqliTEQQO80k4pUjjRpu64MglVEoxJF3e4yM5v2WeLk3jmZfaFjV2D1t39IqLPGWmpQNCBapmFttVcAF_6Q4';
 
     // --- ADD THIS HELPER FUNCTION ---
@@ -28,6 +26,12 @@ const MoreView = () => {
         if (window.confirm('Are you sure you want to logout?')) {
             logout();
         }
+    };
+
+    const handleChangePatient = () => {
+        // By selecting 'null', we trigger the logic in AuthContext
+        // to show the patient selection screen.
+        selectPatient(null);
     };
 
     const handleNotificationClick = async () => {
@@ -108,17 +112,6 @@ const MoreView = () => {
 
             {/* Settings Options */}
             <div className="space-y-3">
-                <button className="w-full bg-white p-4 rounded-xl shadow-sm flex items-center justify-between hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                        <span className="font-medium text-gray-800">Profile Settings</span>
-                    </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                </button>
 
                 <button 
                     onClick={handleNotificationClick}
@@ -135,17 +128,22 @@ const MoreView = () => {
                     </svg>
                 </button>
 
-                <button className="w-full bg-white p-4 rounded-xl shadow-sm flex items-center justify-between hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                {patients && patients.length > 1 && (
+                    <button 
+                        onClick={handleChangePatient}
+                        className="w-full bg-white p-4 rounded-xl shadow-sm flex items-center justify-between hover:bg-gray-50 transition-colors"
+                    >
+                        <div className="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                            </svg>
+                            <span className="font-medium text-gray-800">Change Active Patient</span>
+                        </div>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
-                        <span className="font-medium text-gray-800">Help & Support</span>
-                    </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                </button>
+                    </button>
+                )}
 
                 <button 
                     onClick={handleLogout}

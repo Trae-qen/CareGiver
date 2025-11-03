@@ -7,8 +7,7 @@ import ManagePlanModal from '../common/ManagePlanModal'; // Import your existing
 import ManageTeamModal from '../common/ManageTeamModal';
 
 const AdminView = () => {
-    const { setSelectedPatient } = useAuth();
-    const { refreshCarePlan } = useCarePlan(); // Get refresh function
+    const { selectPatient } = useAuth();
     const [patients, setPatients] = useState([]);
     const [users, setUsers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -98,15 +97,14 @@ const AdminView = () => {
 
     // Function to open the patient editor
     const handleEditPatientPlan = (patient) => {
-        setSelectedPatient(patient); // Set the global patient
-        refreshCarePlan(patient.id); // Tell CarePlanContext to load this patient's data
+        selectPatient(patient); // Set the global patient
         setIsPlanModalOpen(true);    // Open the modal
     };
 
     // Function to close the patient editor
     const handleClosePlanModal = () => {
         setIsPlanModalOpen(false);
-        setSelectedPatient(null); // Clear the global patient
+        selectPatient(null); // Clear the global patient
     };
 
 
