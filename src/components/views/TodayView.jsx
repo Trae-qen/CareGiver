@@ -74,7 +74,6 @@ const TodayView = () => {
                 user_id: user.id,
                 patient_id: selectedPatient.id,
                 scheduled_time: scheduledTime.toISOString(),
-                taken_time: status === 'taken' ? today.toISOString() : null,
                 status,
                 notes: ''
             });
@@ -202,11 +201,7 @@ const TodayView = () => {
                                         <p className="text-xs text-gray-500">{med?.dosage || ''}</p>
                                     </div>
                                 </div>
-                                {adherence ? (
-                                    <span className={`text-xs px-2 py-1 rounded ${adherence.status === 'taken' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                        {adherence.status === 'taken' ? 'Taken' : 'Skipped'}
-                                    </span>
-                                ) : null}
+                                
                             </div>
                         );
                     })
