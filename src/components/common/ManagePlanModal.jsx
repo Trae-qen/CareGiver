@@ -3,22 +3,19 @@ import { medicationScheduleAPI } from '../../services/api';
 import AppIcon from './AppIcon';
 import { useCarePlan } from '../../context/CarePlanContext';
 import { useAuth } from '../../context/AuthContext';
+import DrugSearchInput from './DrugSearchInput';
 
 const ManagePlanModal = ({ isOpen, onClose}) => {
     const { medications, patientInfo, updateMedication, updatePatientInfo, addMedication, deleteMedication } = useCarePlan();    const { user, selectedPatient } = useAuth();
     const [activeTab, setActiveTab] = useState('overview');
     const [showAddMedModal, setShowAddMedModal] = useState(false);
+    const [patientData, setPatientData] = useState({});
     const [newMedication, setNewMedication] = useState({
         name: '',
         dosage: '',
         frequency: 'Daily',
         time: '08:00'
     });
-
-    // --- MOVED HOOKS START ---
-    // These hooks must be called before any conditional returns.
-    
-    // Medication schedule state
     const [schedules, setSchedules] = useState([]);
     const [loadingSchedules, setLoadingSchedules] = useState(true);
     const [showAddSchedule, setShowAddSchedule] = useState(false);
@@ -31,30 +28,50 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
     });
     const [aideToAssign, setAideToAssign] = useState('');
 
+
     useEffect(() => {
-        // Fetch schedules when the modal opens, not just when the tab is clicked
+        if (isOpen && patientInfo) {
+            // Ensure patientInfo is using the correct keys from the API response
+            setPatientData({
+                name: patientInfo.name || '',
+                age: patientInfo.age || '',
+                allergies: patientInfo.allergies || '',
+                emergency_contact: patientInfo.emergency_contact || '', // <-- Must use snake_case
+                doctor: patientInfo.doctor || '',
+            });
+        }
+    }, [isOpen, patientInfo]);
+
+
+    useEffect(() => {
         if (isOpen && selectedPatient) {
             setLoadingSchedules(true);
-            // Pass the patient_id so you only get schedules for this patient
             medicationScheduleAPI.getAll({ patient_id: selectedPatient.id })
                 .then(setSchedules)
                 .catch(error => console.error("Failed to load schedules", error))
                 .finally(() => setLoadingSchedules(false));
         } else if (!isOpen) {
-            // Clear data when modal closes
             setSchedules([]);
         }
     }, [isOpen, selectedPatient]);
-    // --- MOVED HOOKS END ---
 
    const currentAideIds = useMemo(() => {
-        // We use (selectedPatient?.aides || []) as a "guard"
-        // This says: if selectedPatient exists, use its .aides,
-        // otherwise, use an empty array []. This prevents the crash.
         return new Set((selectedPatient?.aides || []).map(a => a.id));
     }, [selectedPatient?.aides]);
-
     
+    
+
+    const handleSavePatientInfo = () => {
+        // Basic validation to ensure the required 'name' field is present
+        if (!patientData.name || patientData.name.trim() === '') {
+            alert("Patient Full Name is required.");
+            return;
+        }
+
+        // Call the context function to trigger the API PUT request
+        // This payload *includes* the required 'name' field, fixing the 422 error.
+        updatePatientInfo(patientData);
+    };
 
 
 
@@ -173,8 +190,8 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
                         <li>
                             <strong>Primary Doctor:</strong> {patientInfo.doctor || 'N/A'}
                         </li>
-                        <li>
-                            <strong>Emergency Contact:</strong> {patientInfo.emergencyContact || 'N/A'}
+                       <li>
+                            <strong>Emergency Contact:</strong> {patientInfo.emergency_contact || 'N/A'}
                         </li>
                     </ul>
                 </div>
@@ -247,24 +264,18 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
         if (!newSchedule.medication_id || !newSchedule.time_of_day) return;
         
         const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-        // 1. Build the payload
         const scheduleWithIds = {
             ...newSchedule,
             user_id: user?.id,
             patient_id: selectedPatient?.id,
             timezone: userTimezone
         };
-
-        // 2. Clean up the payload: remove day_of_week if not weekly
         if (scheduleWithIds.recurrence_rule !== 'weekly') {
             delete scheduleWithIds.day_of_week;
         }
 
         await medicationScheduleAPI.create(scheduleWithIds);
         setShowAddSchedule(false);
-        
-        // 3. Reset the state (including the new day_of_week)
         setNewSchedule({
             medication_id: '',
             time_of_day: '08:00',
@@ -415,35 +426,43 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
                         <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                         <input
                             type="text"
-                            value={patientInfo.name}
-                            onChange={(e) => updatePatientInfo({ name: e.target.value })}
+                            // Use patientData state
+                            value={patientData.name || ''} 
+                            // Update local state
+                            onChange={(e) => setPatientData(prev => ({ ...prev, name: e.target.value }))} 
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
                         <input
-                            type="number"
-                            value={patientInfo.age}
-                            onChange={(e) => updatePatientInfo({ age: e.target.value })}
+                            type="number" // Corrected type to 'number'
+                            // Use patientData state for age
+                            value={patientData.age || ''} 
+                            // Update local state, ensuring value is handled as an integer
+                            onChange={(e) => setPatientData(prev => ({ ...prev, age: e.target.value ? parseInt(e.target.value, 10) : '' }))} 
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Allergies</label>
                         <textarea
-                            value={patientInfo.allergies}
-                            onChange={(e) => updatePatientInfo({ allergies: e.target.value })}
+                            // Use patientData state
+                            value={patientData.allergies || ''}
+                            // Update local state
+                            onChange={(e) => setPatientData(prev => ({ ...prev, allergies: e.target.value }))}
                             rows="2"
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
-                    <div>
+                   <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
                         <input
                             type="text"
-                            value={patientInfo.emergencyContact}
-                            onChange={(e) => updatePatientInfo({ emergencyContact: e.target.value })}
+                            // FIX: Use snake_case for reading the data
+                            value={patientData.emergency_contact || ''}
+                            // FIX: Use snake_case for updating the local state (which is sent to the API)
+                            onChange={(e) => setPatientData(prev => ({ ...prev, emergency_contact: e.target.value }))}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
@@ -451,15 +470,20 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
                         <label className="block text-sm font-medium text-gray-700 mb-1">Primary Doctor</label>
                         <input
                             type="text"
-                            value={patientInfo.doctor}
-                            onChange={(e) => updatePatientInfo({ doctor: e.target.value })}
+                            // Use patientData state
+                            value={patientData.doctor || ''}
+                            // Update local state
+                            onChange={(e) => setPatientData(prev => ({ ...prev, doctor: e.target.value }))}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
                 </div>
             </div>
 
-            <button className="w-full bg-blue-500 text-white py-3 rounded-lg font-semibold hover:bg-blue-600 transition-colors">
+            <button 
+                onClick={handleSavePatientInfo} // Connect the save function
+                className="w-full bg-blue-500 text-white py-3 rounded-lg font-semibold hover:bg-blue-600 transition-colors"
+            >
                 Save Patient Information
             </button>
         </div>
@@ -520,18 +544,15 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
                         ))}
                     </div>
                 </div>
-
-                {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6">
                     {renderContent()}
                 </div>
             </div>
 
-            {/* Add Medication Modal */}
             {showAddMedModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full m-4">
-                        <div className="bg-gradient-to-r from-violet-500 to-purple-600 text-white p-4 rounded-t-2xl">
+                        <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-2xl"> 
                             <div className="flex items-center justify-between">
                                 <h3 className="text-xl font-bold">Add New Medication</h3>
                                 <button
@@ -547,12 +568,10 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
                         <div className="p-6 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Medication Name *</label>
-                                <input
-                                    type="text"
+                                <DrugSearchInput
                                     value={newMedication.name}
-                                    onChange={(e) => setNewMedication({ ...newMedication, name: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
-                                    placeholder="e.g., Aspirin"
+                                    onSelect={(name) => setNewMedication(prev => ({ ...prev, name }))}
+                                    placeholder="Search by brand or generic name..."
                                 />
                             </div>
                             <div>
@@ -561,44 +580,37 @@ const ManagePlanModal = ({ isOpen, onClose}) => {
                                     type="text"
                                     value={newMedication.dosage}
                                     onChange={(e) => setNewMedication({ ...newMedication, dosage: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
-                                    placeholder="e.g., 100mg"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" // Updated focus ring
+                                    required
                                 />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
                                 <select
                                     value={newMedication.frequency}
-                                    onChange={(e) => setNewMedication({ ...newMedication, frequency: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                    onChange={e => setNewMedication({ ...newMedication, frequency: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" // Updated focus ring
                                 >
                                     <option value="Daily">Daily</option>
-                                    <option value="Twice Daily">Twice Daily</option>
-                                    <option value="Three Times Daily">Three Times Daily</option>
                                     <option value="Weekly">Weekly</option>
                                     <option value="As Needed">As Needed</option>
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Time</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Time of Day</label>
                                 <input
                                     type="time"
                                     value={newMedication.time}
-                                    onChange={(e) => setNewMedication({ ...newMedication, time: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                    onChange={e => setNewMedication({ ...newMedication, time: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" // Updated focus ring
                                 />
                             </div>
                             <div className="flex space-x-3 pt-4">
-                                <button
-                                    onClick={() => setShowAddMedModal(false)}
-                                    className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors"
-                                >
-                                    Cancel
-                                </button>
+                                <button onClick={() => setShowAddMedModal(false)} className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors">Cancel</button>
                                 <button
                                     onClick={handleAddMedication}
                                     disabled={!newMedication.name || !newMedication.dosage}
-                                    className="flex-1 px-4 py-3 bg-violet-600 text-white font-semibold rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="flex-1 px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     Add Medication
                                 </button>

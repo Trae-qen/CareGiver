@@ -104,7 +104,6 @@ const AdminView = () => {
     // Function to close the patient editor
     const handleClosePlanModal = () => {
         setIsPlanModalOpen(false);
-        selectPatient(null); // Clear the global patient
     };
 
 
