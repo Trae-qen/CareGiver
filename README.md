@@ -2,7 +2,7 @@
 
 A full-stack application for caregiver management and scheduling, featuring a React frontend and FastAPI backend with PostgreSQL.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Node.js (v16 or later recommended)
@@ -12,7 +12,7 @@ A full-stack application for caregiver management and scheduling, featuring a Re
 - Redis (for background tasks)
 - Git
 
-## 🚀 Local Development
+## Local Development
 
 ### Frontend Setup
 
@@ -74,7 +74,7 @@ A full-stack application for caregiver management and scheduling, featuring a Re
    celery -A celery_utils.celery_app worker --loglevel=info
    ```
 
-## 🏗️ Building for Production
+## Building for Production
 
 ### Frontend
 1. **Create a production build**
@@ -104,7 +104,7 @@ A full-stack application for caregiver management and scheduling, featuring a Re
    alembic upgrade head
    ```
 
-## 🌐 Deployment
+## Deployment
 
 ### Railway (Recommended for Full-Stack)
 
@@ -184,7 +184,7 @@ Railway can deploy both your frontend and backend services together.
    railway up
    ```
 
-## 🔧 Environment Variables
+## Environment Variables
 
 ### Frontend (`.env` in root)
 ```
@@ -209,7 +209,7 @@ REDIS_URL=redis://localhost:6379/0
 JWT_SECRET=your_jwt_secret_here
 ```
 
-## 📦 Project Structure
+##  Project Structure
 
 ```
 CareGiver/
@@ -227,7 +227,7 @@ CareGiver/
 └── README.md           # This file
 ```
 
-## 📦 Dependencies
+## Dependencies
 
 ### Frontend
 - React 18
@@ -242,7 +242,7 @@ CareGiver/
 - Redis (message broker for Celery)
 - Uvicorn (ASGI server)
 
-## 🤝 Contributing
+##  Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
@@ -250,13 +250,13 @@ CareGiver/
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📄 License
+##  License
 
 This project is licensed under the [Your License] - see the LICENSE.md file for details.
 
 ---
 
-💡 **Note for Handover:**
+ **Note for Handover:**
 - The application consists of a React frontend and FastAPI backend
 - The backend requires a PostgreSQL database and Redis for background tasks
 - Environment variables must be set up for both frontend and backend
